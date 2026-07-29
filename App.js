@@ -22,11 +22,13 @@ import { colors, spacing } from './theme';
 export default function App() {
   const [ready, setReady] = useState(false);
   const [inviteId, setInviteId] = useState(null);
-  const [inviteError, setInviteError] = useState(null); // null | 'missing' | 'invalid'
+  const [inviteError, setInviteError] = useState(null);
   const [step, setStep] = useState(1);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const fade = useRef(new Animated.Value(1)).current;
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -51,11 +53,13 @@ export default function App() {
         setSelectedDate(saved.selectedDate ?? null);
         setSelectedTime(saved.selectedTime ?? null);
         setSelectedOrder(saved.selectedOrder ?? null);
+        setSubmitted(Boolean(saved.notified));
         setStep(5);
       } else if (saved) {
         setSelectedDate(saved.selectedDate ?? null);
         setSelectedTime(saved.selectedTime ?? null);
         setSelectedOrder(saved.selectedOrder ?? null);
+        setSubmitted(Boolean(saved.notified));
         if (saved.selectedOrder) setStep(5);
         else if (saved.selectedTime) setStep(4);
         else if (saved.selectedDate) setStep(3);
@@ -86,6 +90,7 @@ export default function App() {
       selectedTime,
       selectedOrder,
       completed: false,
+      notified: submitted,
       ...partial,
     };
     await saveInvite(inviteId, payload);
@@ -112,26 +117,39 @@ export default function App() {
 
   const handleOrderConfirm = async (order) => {
     setSelectedOrder(order);
-    const payload = {
+    await saveInvite(inviteId, {
       selectedDate,
       selectedTime,
       selectedOrder: order,
       completed: true,
       completedAt: new Date().toISOString(),
       notified: false,
-    };
-    await saveInvite(inviteId, payload);
+    });
     animateTo(5);
+  };
 
+  const handleSubmit = async () => {
+    if (!inviteId || submitted || submitting) return false;
+    setSubmitting(true);
     const ok = await notifyInviteAccepted({
       inviteId,
       date: selectedDate,
       time: selectedTime,
-      order,
+      order: selectedOrder,
     });
+    setSubmitting(false);
     if (ok) {
-      await saveInvite(inviteId, { ...payload, notified: true });
+      setSubmitted(true);
+      await saveInvite(inviteId, {
+        selectedDate,
+        selectedTime,
+        selectedOrder,
+        completed: true,
+        notified: true,
+        completedAt: new Date().toISOString(),
+      });
     }
+    return ok;
   };
 
   const handleReset = async () => {
@@ -139,6 +157,7 @@ export default function App() {
     setSelectedDate(null);
     setSelectedTime(null);
     setSelectedOrder(null);
+    setSubmitted(false);
     animateTo(1);
   };
 
@@ -176,6 +195,9 @@ export default function App() {
               selectedDate={selectedDate}
               selectedTime={selectedTime}
               selectedOrder={selectedOrder}
+              submitted={submitted}
+              submitting={submitting}
+              onSubmit={handleSubmit}
               onReset={handleReset}
             />
           ) : null}

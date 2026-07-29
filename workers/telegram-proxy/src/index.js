@@ -153,20 +153,27 @@ async function ensureInvite(env, chatId, from = {}) {
   requireKv(env);
   const chatKey = String(chatId);
   const existing = await env.INVITES.get(`chat:${chatKey}`, 'json');
+
+  // Active unused link → reuse.
+  // Used/completed (or missing) → create a brand-new link.
   if (existing?.code) {
-    const record = (await env.INVITES.get(`code:${existing.code}`, 'json')) || {};
-    record.username = from.username || record.username || '';
-    record.firstName = from.first_name || record.firstName || '';
-    record.updatedAt = new Date().toISOString();
-    await env.INVITES.put(`code:${existing.code}`, JSON.stringify(record));
-    return existing.code;
+    const record = (await env.INVITES.get(`code:${existing.code}`, 'json')) || null;
+    if (record && !record.completed) {
+      record.username = from.username || record.username || '';
+      record.firstName = from.first_name || record.firstName || '';
+      record.updatedAt = new Date().toISOString();
+      await env.INVITES.put(`code:${existing.code}`, JSON.stringify(record));
+      return existing.code;
+    }
   }
+
   let code = makeCode();
   while (await env.INVITES.get(`code:${code}`)) code = makeCode();
   const record = {
     chatId: chatKey,
     username: from.username || '',
     firstName: from.first_name || '',
+    completed: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -242,6 +249,12 @@ async function handleNotify(request, env) {
       disable_web_page_preview: true,
     });
     if (!result.ok) return json({ ok: false, error: result.description || 'telegram_error' }, 502);
+
+    // Mark invite as used so next /start gets a fresh link
+    record.completed = true;
+    record.completedAt = new Date().toISOString();
+    await env.INVITES.put(`code:${String(inviteId)}`, JSON.stringify(record));
+
     return json({ ok: true });
   } catch (e) {
     return json({ ok: false, error: e.message || 'error' }, 500);

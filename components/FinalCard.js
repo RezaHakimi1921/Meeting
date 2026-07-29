@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radii, spacing } from '../theme';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
 
-const SHARE_URL = 'http://94.182.92.79/meeting';
+const BOT_URL = 'https://t.me/Meetingir_mir_bot';
 const CONFETTI = ['🎉', '✨', '💕', '💗', '🌸', '💖', '⭐', '🎀'];
 
 function ConfettiBurst() {
@@ -54,31 +54,35 @@ function ConfettiPiece({ emoji, left, delay, drift }) {
   );
 }
 
-export default function FinalCard({ selectedDate, selectedTime, selectedOrder, onReset }) {
-  const shareScale = useRef(new Animated.Value(1)).current;
+export default function FinalCard({
+  selectedDate,
+  selectedTime,
+  selectedOrder,
+  submitted,
+  submitting,
+  onSubmit,
+  onReset,
+}) {
+  const primaryScale = useRef(new Animated.Value(1)).current;
+  const secondaryScale = useRef(new Animated.Value(1)).current;
+  const [localDone, setLocalDone] = useState(false);
   const clock = selectedTime?.labelFa || selectedTime?.label || '';
+  const done = submitted || localDone;
 
   const message = `خوشحالم نگفتی نه! پس ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock}، دنبالت میام برای ${selectedOrder?.label ?? ''} 🚗`;
 
-  const shareText = `دعوت به قرار 💕 ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock} — ${selectedOrder?.emoji ?? ''} ${selectedOrder?.label ?? ''}\nمنتظرتم با لبخند 🌸\n${SHARE_URL}`;
-
-  const handleShare = async () => {
-    bounce(shareScale);
+  const handleSubmit = async () => {
+    if (done || submitting) return;
+    bounce(primaryScale);
     tryVibrate();
-    try {
-      if (typeof navigator !== 'undefined' && navigator.share) {
-        await navigator.share({ title: 'Date Invite', text: shareText, url: SHARE_URL });
-        return;
-      }
-      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareText);
-        alert('کپی شد 💌');
-        return;
-      }
-      alert(shareText);
-    } catch {
-      // user cancelled share — ignore
-    }
+    const ok = await onSubmit?.();
+    if (ok) setLocalDone(true);
+  };
+
+  const handleOwnLink = () => {
+    bounce(secondaryScale);
+    tryVibrate();
+    Linking.openURL(BOT_URL);
   };
 
   return (
@@ -91,11 +95,25 @@ export default function FinalCard({ selectedDate, selectedTime, selectedOrder, o
         برای اینکه ازت درخواست کنم یه وبسایت طراحی کردم، چیز مهمی نبود 🎀
       </Text>
 
-      <Animated.View style={{ transform: [{ scale: shareScale }] }}>
-        <Pressable onPress={handleShare} style={styles.shareBtn}>
-          <Text style={styles.shareText}>اشتراک‌گذاری 💌</Text>
+      <Animated.View style={{ transform: [{ scale: primaryScale }] }}>
+        <Pressable
+          onPress={handleSubmit}
+          disabled={done || submitting}
+          style={[styles.primaryBtn, (done || submitting) && styles.btnDisabled]}
+        >
+          <Text style={styles.primaryText}>
+            {done ? 'ثبت شد 💕' : submitting ? 'داره ثبت می‌شه...' : 'بزن بریم، ثبتش کن 💌'}
+          </Text>
         </Pressable>
       </Animated.View>
+
+      <Animated.View style={{ transform: [{ scale: secondaryScale }] }}>
+        <Pressable onPress={handleOwnLink} style={styles.secondaryBtn}>
+          <Text style={styles.secondaryText}>لینک دعوت خودت رو بساز ✨</Text>
+        </Pressable>
+      </Animated.View>
+
+      <Text style={styles.hint}>با ساخت لینک خودت می‌تونی برای کس دیگه‌ای هم دعوت بفرستی</Text>
 
       <Pressable onPress={onReset} hitSlop={8}>
         <Text style={styles.reset}>از اول</Text>
@@ -155,17 +173,41 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     marginBottom: spacing.lg,
   },
-  shareBtn: {
+  primaryBtn: {
     backgroundColor: colors.primary,
     borderRadius: radii.pill,
     paddingVertical: 14,
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
-  shareText: {
+  secondaryBtn: {
+    backgroundColor: '#FFF0F6',
+    borderRadius: radii.pill,
+    borderWidth: 2,
+    borderColor: colors.primarySoft,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  btnDisabled: {
+    opacity: 0.7,
+  },
+  primaryText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  secondaryText: {
+    color: colors.primary,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  hint: {
+    color: colors.muted,
+    fontSize: 12,
+    textAlign: 'center',
+    writingDirection: 'rtl',
+    marginBottom: spacing.md,
   },
   reset: {
     color: colors.muted,
