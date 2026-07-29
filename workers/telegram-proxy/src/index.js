@@ -1,15 +1,14 @@
 /**
- * Telegram bridge for Date Invite
+ * Telegram bridge for Date Invite (Cloudflare Worker + D1)
  *
- * Required in Cloudflare Dashboard → Settings → Bindings / Variables:
+ * Dashboard bindings / vars:
  *   Secret: TELEGRAM_BOT_TOKEN
- *   Vars:   PUBLIC_BASE_URL = http://94.182.92.79/meeting
+ *   Vars:   PUBLIC_BASE_URL = https://<neutral-host>   (no IP, no workers.dev name)
+ *           ORIGIN_HINT = http://94.182.92.79
  *           BOT_USERNAME = Meetingir_mir_bot
- *   KV:     binding name must be exactly INVITES
+ *   D1:     binding name must be exactly DB
  *
- * Then call once (from any PC that can reach Telegram):
- *   POST https://api.telegram.org/bot<TOKEN>/setWebhook
- *   body: {"url":"https://nameless-feather-4353.rezahakimi1921.workers.dev/telegram-webhook"}
+ * Run schema.sql once in D1 Console (Execute).
  */
 export default {
   async fetch(request, env, ctx) {
@@ -30,30 +29,61 @@ export default {
             ok: true,
             service: 'meeting-telegram-bridge',
             hasToken: Boolean(token(env)),
-            hasKv: Boolean(env.INVITES),
-            publicBase: publicBase(env),
-            workerPublic: workerPublic(env),
+            hasDb: Boolean(env.DB),
+            publicBase: await resolvePublicBase(env),
           })
         );
       }
 
-      // Short redirect: /r/CODE → meeting page (hides server IP in shared links)
+      // /r/CODE → open the meeting page.
+      // Note: Workers cannot fetch() raw IPs (CF error 1003), so we redirect the browser.
       const redirectMatch = url.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)$/);
       if (request.method === 'GET' && redirectMatch) {
-        const dest = `${publicBase(env)}?i=${encodeURIComponent(redirectMatch[1])}`;
-        return Response.redirect(dest, 302);
+        const code = redirectMatch[1];
+        const base = await resolvePublicBase(env);
+        // Prefer clean public base; if that still points at Worker /meeting, go straight to origin host
+        if (base.includes('workers.dev')) {
+          return Response.redirect(`${originHint(env)}/meeting?i=${encodeURIComponent(code)}`, 302);
+        }
+        return Response.redirect(`${base}?i=${encodeURIComponent(code)}`, 302);
       }
 
-      // Telegram sends updates here after setWebhook
+      if (request.method === 'GET' && (url.pathname === '/meeting' || url.pathname.startsWith('/meeting/'))) {
+        return proxyMeeting(request, env, url);
+      }
+
       if (request.method === 'POST' && url.pathname === '/telegram-webhook') {
         const update = await request.json();
-        ctx.waitUntil(handleBotUpdate(env, update));
+        try {
+          await ensureDb(env);
+          await handleBotUpdate(env, update);
+        } catch (e) {
+          const chatId =
+            update?.message?.chat?.id ||
+            update?.edited_message?.chat?.id ||
+            update?.callback_query?.message?.chat?.id;
+          if (chatId) {
+            try {
+              await tg(env, 'sendMessage', {
+                chat_id: chatId,
+                text: `متأسفم، ربات خطا داد 😕\n${String(e.message || e).slice(0, 200)}`,
+              });
+            } catch {
+              // ignore
+            }
+          }
+        }
+        // Always ACK Telegram so delivery keeps working
         return new Response('ok');
       }
 
-      // Helper: register webhook with Telegram (needs token secret configured)
       if (request.method === 'POST' && url.pathname === '/register-webhook') {
         return cors(await registerWebhook(env, url.origin));
+      }
+
+      // Apply D1 schema (safe to call more than once)
+      if (request.method === 'POST' && url.pathname === '/init-db') {
+        return cors(await initDb(env));
       }
 
       const inviteMatch = url.pathname.match(/^\/invite\/([a-zA-Z0-9_-]+)$/);
@@ -71,7 +101,6 @@ export default {
     }
   },
 
-  // Optional backup if Cron is enabled
   async scheduled(event, env, ctx) {
     ctx.waitUntil(pollUpdates(env));
   },
@@ -98,6 +127,34 @@ async function proxyTelegram(request, url) {
   });
 }
 
+/**
+ * Serve meeting static files.
+ * Cloudflare Workers CANNOT fetch() a raw IP (returns error 1003).
+ * If ORIGIN_HINT is an IP, redirect the browser instead of proxying.
+ */
+async function proxyMeeting(request, env, url) {
+  const origin = originHint(env);
+  const dest = `${origin}${url.pathname}${url.search}`;
+
+  // Raw IPv4/IPv6 in URL → redirect browser (fetch would 1003)
+  if (/^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\//i.test(origin + '/') ||
+      /^https?:\/\/\[/i.test(origin)) {
+    return Response.redirect(dest, 302);
+  }
+
+  const res = await fetch(dest, {
+    method: 'GET',
+    headers: { 'User-Agent': request.headers.get('User-Agent') || 'meeting-bridge' },
+    redirect: 'follow',
+  });
+  const headers = new Headers(res.headers);
+  headers.delete('content-encoding');
+  headers.delete('transfer-encoding');
+  headers.delete('content-security-policy');
+  headers.set('Cache-Control', res.headers.get('Cache-Control') || 'public, max-age=60');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 function cors(res) {
   const headers = new Headers(res.headers);
   headers.set('Access-Control-Allow-Origin', '*');
@@ -117,8 +174,8 @@ function token(env) {
   return env.TELEGRAM_BOT_TOKEN || '';
 }
 
-function publicBase(env) {
-  return (env.PUBLIC_BASE_URL || 'http://94.182.92.79/meeting').replace(/\/$/, '');
+function originHint(env) {
+  return (env.ORIGIN_HINT || 'http://94.182.92.79').replace(/\/$/, '');
 }
 
 function workerPublic(env) {
@@ -128,53 +185,203 @@ function workerPublic(env) {
   );
 }
 
-/** Bridge URL on Worker (no server IP in the text). */
-function bridgeLink(env, code) {
+function isDirtyPublicUrl(url) {
+  const u = String(url || '').toLowerCase();
+  if (!u) return true;
+  if (u.includes('94.182.92.79')) return true;
+  if (u.includes('workers.dev')) return true;
+  if (u.includes('rezahakimi')) return true;
+  return false;
+}
+
+function isCleanPublicUrl(url) {
+  const u = String(url || '').trim();
+  if (!/^https?:\/\//i.test(u)) return false;
+  return !isDirtyPublicUrl(u);
+}
+
+function configuredPublicBase(env) {
+  return (env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+}
+
+function requireDb(env) {
+  if (!env.DB) {
+    throw new Error('D1 binding DB is missing. Add it in Worker Settings → Bindings.');
+  }
+}
+
+async function initDb(env) {
+  requireDb(env);
+  await env.DB.batch([
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS invites (
+        code TEXT PRIMARY KEY,
+        chat_id TEXT NOT NULL,
+        alias TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT '',
+        first_name TEXT NOT NULL DEFAULT '',
+        completed INTEGER NOT NULL DEFAULT 0,
+        burned INTEGER NOT NULL DEFAULT 0,
+        short_url TEXT,
+        open_url TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      )
+    `),
+    env.DB.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_invites_chat ON invites(chat_id)`
+    ),
+    env.DB.prepare(
+      `CREATE INDEX IF NOT EXISTS idx_invites_chat_open ON invites(chat_id, completed, burned)`
+    ),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS chat_state (
+        chat_id TEXT PRIMARY KEY,
+        pending TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+      )
+    `),
+    env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    `),
+  ]);
+  return json({ ok: true, initialized: true });
+}
+
+/** Ensure schema exists (idempotent). */
+async function ensureDb(env) {
+  requireDb(env);
+  try {
+    const ready = await env.DB.prepare('SELECT value FROM meta WHERE key = ?')
+      .bind('schema_v1')
+      .first();
+    if (ready?.value === '1') return;
+  } catch {
+    // tables missing — create below
+  }
+  await initDb(env);
+  await env.DB.prepare(
+    `INSERT INTO meta (key, value) VALUES ('schema_v1', '1')
+     ON CONFLICT(key) DO UPDATE SET value = '1'`
+  ).run();
+}
+
+async function metaGet(env, key) {
+  requireDb(env);
+  const row = await env.DB.prepare('SELECT value FROM meta WHERE key = ?').bind(key).first();
+  return row?.value || null;
+}
+
+async function metaPut(env, key, value) {
+  requireDb(env);
+  await env.DB.prepare(
+    `INSERT INTO meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  )
+    .bind(key, String(value))
+    .run();
+}
+
+async function resolvePublicBase(env) {
+  const configured = configuredPublicBase(env);
+  // Ignore dirty PUBLIC_BASE_URL (raw IP / personal workers.dev) for share links
+  if (isCleanPublicUrl(configured)) return configured;
+
+  try {
+    const cached = await metaGet(env, 'public_base');
+    if (isCleanPublicUrl(cached)) return String(cached).replace(/\/$/, '');
+  } catch {
+    // DB may not be ready yet
+  }
+
+  try {
+    const res = await fetch(`${originHint(env)}/meeting/public-base.txt`, {
+      headers: { 'Cache-Control': 'no-cache' },
+    });
+    // fetch to raw IP is blocked by CF — may throw/1003; ignore
+    if (res.ok) {
+      let text = (await res.text()).trim().replace(/\/$/, '');
+      if (text && text.includes('94.182.92.79') && !text.endsWith('/meeting')) {
+        text = `${text}/meeting`;
+      }
+      if (isCleanPublicUrl(text)) {
+        try {
+          await metaPut(env, 'public_base', text);
+        } catch {
+          // ignore
+        }
+        return text;
+      }
+    }
+  } catch {
+    // ignore (often CF 1003 when ORIGIN_HINT is an IP)
+  }
+
+  // Fallback: Worker /r bridge (browser will be redirected to origin)
+  return `${workerPublic(env)}/meeting`;
+}
+
+function inviteOpenLink(base, code) {
+  return `${base}?i=${encodeURIComponent(code)}`;
+}
+
+function inviteBridgePath(env, code) {
   return `${workerPublic(env)}/r/${encodeURIComponent(code)}`;
 }
 
-/**
- * Prefer Worker /r/CODE (no server IP). Optional is.gd on top.
- * B2n.ir cannot be automated (Cloudflare challenge, no public API).
- */
+async function getInviteRow(env, code) {
+  requireDb(env);
+  return env.DB.prepare('SELECT * FROM invites WHERE code = ?').bind(String(code)).first();
+}
+
 async function resolveShareLink(env, code) {
-  requireKv(env);
-  const record = (await env.INVITES.get(`code:${code}`, 'json')) || null;
-  if (record?.shortUrl) return record.shortUrl;
+  requireDb(env);
+  const record = await getInviteRow(env, code);
+  if (
+    record?.short_url &&
+    record.open_url &&
+    !isDirtyPublicUrl(record.short_url) &&
+    !isDirtyPublicUrl(record.open_url)
+  ) {
+    return record.short_url;
+  }
 
-  // Never expose server IP in Telegram messages
-  const bridge = bridgeLink(env, code);
-  let shortUrl = bridge;
+  const base = await resolvePublicBase(env);
+  let target = inviteOpenLink(base, code);
+  if (isDirtyPublicUrl(target)) {
+    target = inviteBridgePath(env, code);
+  }
 
-  try {
-    const res = await fetch(
-      `https://is.gd/create.php?format=json&url=${encodeURIComponent(bridge)}`,
-      { method: 'GET' }
-    );
-    const data = await res.json();
-    if (data && data.shorturl) shortUrl = data.shorturl;
-  } catch {
-    // keep Worker bridge
+  let shortUrl = target;
+  for (const api of [
+    `https://is.gd/create.php?format=json&url=${encodeURIComponent(target)}`,
+    `https://v.gd/create.php?format=json&url=${encodeURIComponent(target)}`,
+  ]) {
+    try {
+      const res = await fetch(api, { method: 'GET' });
+      const data = await res.json();
+      if (data && data.shorturl && !isDirtyPublicUrl(data.shorturl)) {
+        shortUrl = data.shorturl;
+        break;
+      }
+    } catch {
+      // try next
+    }
   }
 
   if (record) {
-    record.shortUrl = shortUrl;
-    record.bridgeUrl = bridge;
-    record.updatedAt = new Date().toISOString();
-    await env.INVITES.put(`code:${code}`, JSON.stringify(record));
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `UPDATE invites SET short_url = ?, open_url = ?, updated_at = ? WHERE code = ?`
+    )
+      .bind(shortUrl, target, now, String(code))
+      .run();
   }
   return shortUrl;
-}
-
-function botEntryShort(env) {
-  // Your B2n entry link — must point to https://t.me/Meetingir_mir_bot (NOT the server IP)
-  return (env.B2N_ENTRY_URL || 'https://B2n.ir/md3187').trim();
-}
-
-function requireKv(env) {
-  if (!env.INVITES) {
-    throw new Error('KV binding INVITES is missing. Add it in Worker Settings → Bindings.');
-  }
 }
 
 async function tg(env, method, body) {
@@ -207,43 +414,107 @@ function makeCode() {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function inviteLink(env, code) {
-  return bridgeLink(env, code);
+async function getChatState(env, chatId) {
+  requireDb(env);
+  return env.DB.prepare('SELECT * FROM chat_state WHERE chat_id = ?')
+    .bind(String(chatId))
+    .first();
 }
 
-async function getActiveCode(env, chatId) {
-  requireKv(env);
-  const existing = await env.INVITES.get(`chat:${String(chatId)}`, 'json');
-  if (!existing?.code) return null;
-  const record = await env.INVITES.get(`code:${existing.code}`, 'json');
-  if (!record || record.completed) return null;
-  return existing.code;
+async function setChatPending(env, chatId, pending) {
+  requireDb(env);
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO chat_state (chat_id, pending, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(chat_id) DO UPDATE SET pending = excluded.pending, updated_at = excluded.updated_at`
+  )
+    .bind(String(chatId), pending || '', now)
+    .run();
 }
 
-async function createInvite(env, chatId, from = {}) {
-  requireKv(env);
+async function clearChatPending(env, chatId) {
+  await setChatPending(env, chatId, '');
+}
+
+async function burnOpenInvites(env, chatId) {
+  requireDb(env);
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE invites
+     SET burned = 1, completed = 1, completed_at = ?, updated_at = ?
+     WHERE chat_id = ? AND completed = 0 AND burned = 0`
+  )
+    .bind(now, now, String(chatId))
+    .run();
+}
+
+async function getActiveInvite(env, chatId) {
+  requireDb(env);
+  return env.DB.prepare(
+    `SELECT * FROM invites
+     WHERE chat_id = ? AND completed = 0 AND burned = 0
+     ORDER BY created_at DESC
+     LIMIT 1`
+  )
+    .bind(String(chatId))
+    .first();
+}
+
+async function createInvite(env, chatId, from = {}, alias = '') {
+  requireDb(env);
   const chatKey = String(chatId);
   let code = makeCode();
-  while (await env.INVITES.get(`code:${code}`)) code = makeCode();
+  while (await getInviteRow(env, code)) code = makeCode();
 
-  const record = {
-    chatId: chatKey,
-    username: from.username || '',
-    firstName: from.first_name || '',
-    completed: false,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  await env.INVITES.put(`code:${code}`, JSON.stringify(record));
-  await env.INVITES.put(`chat:${chatKey}`, JSON.stringify({ code }));
+  const now = new Date().toISOString();
+  await burnOpenInvites(env, chatKey);
+
+  await env.DB.prepare(
+    `INSERT INTO invites (
+      code, chat_id, alias, username, first_name, completed, burned,
+      short_url, open_url, created_at, updated_at, completed_at
+    ) VALUES (?, ?, ?, ?, ?, 0, 0, NULL, NULL, ?, ?, NULL)`
+  )
+    .bind(
+      code,
+      chatKey,
+      String(alias || '').trim().slice(0, 64),
+      from.username || '',
+      from.first_name || '',
+      now,
+      now
+    )
+    .run();
+
   return code;
 }
 
-async function sendLinkMessage(env, chatId, code, isNew) {
+async function askForAlias(env, chatId) {
+  await setChatPending(env, chatId, 'await_alias');
+  const result = await tg(env, 'sendMessage', {
+    chat_id: chatId,
+    text: [
+      'سلام 💕',
+      '',
+      'این لینک برای کیه؟',
+      'یک اسم/Alias بفرست (مثلاً: سارا)',
+      '',
+      'این اسم فقط برای خودت ذخیره می‌شه؛ طرف مقابل نمی‌بینه.',
+    ].join('\n'),
+  });
+  if (!result?.ok) {
+    throw new Error(result?.description || 'telegram_send_failed');
+  }
+}
+
+async function sendLinkMessage(env, chatId, code) {
+  const row = await getInviteRow(env, code);
   const link = await resolveShareLink(env, code);
-  const title = isNew ? 'سلام 💕 لینک جدیدت آماده‌ست.' : 'سلام 💕 لینک قبلی‌ت هنوز آماده‌ست.';
+  const alias = (row?.alias || '').trim() || '—';
   const text = [
-    title,
+    'سلام 💕 لینک جدیدت آماده‌ست.',
+    '',
+    `🏷 برای: ${alias}`,
     '',
     'این لینک رو برای کسی که دوست داری بفرست.',
     'وقتی جواب «آره» بده و فرم رو تموم کنه، همینجا برات می‌فرستم.',
@@ -255,109 +526,138 @@ async function sendLinkMessage(env, chatId, code, isNew) {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [[{ text: 'لینک جدید ✨', callback_data: 'link:new' }]],
+    },
   });
 }
 
-async function askLinkChoice(env, chatId, activeCode) {
-  const link = await resolveShareLink(env, activeCode);
+async function showActiveOrAsk(env, chatId) {
+  const active = await getActiveInvite(env, chatId);
+  if (!active) {
+    await askForAlias(env, chatId);
+    return;
+  }
+
+  const link = await resolveShareLink(env, active.code);
+  const alias = (active.alias || '').trim() || '—';
   await tg(env, 'sendMessage', {
     chat_id: chatId,
     text: [
       'سلام 💕',
       '',
-      'یه لینک استفاده‌نشده داری:',
+      `🏷 برای: ${alias}`,
+      'لینک آماده‌ت اینه (هنوز استفاده نشده):',
       link,
       '',
-      'چی می‌خوای؟',
+      'اگر لینک جدید بسازی، لینک قبلی می‌سوزه.',
     ].join('\n'),
     disable_web_page_preview: true,
     reply_markup: {
-      inline_keyboard: [
-        [
-          { text: 'لینک قبلی 🔗', callback_data: 'link:prev' },
-          { text: 'لینک جدید ✨', callback_data: 'link:new' },
-        ],
-      ],
+      inline_keyboard: [[{ text: 'لینک جدید ✨', callback_data: 'link:new' }]],
     },
   });
 }
 
 async function handleBotUpdate(env, update) {
-  // Inline button presses
   if (update.callback_query) {
     const cq = update.callback_query;
     const chatId = cq.message?.chat?.id;
     const data = cq.data || '';
     if (!chatId) return;
 
-    await tg(env, 'answerCallbackQuery', { callback_query_id: cq.id });
+    try {
+      await tg(env, 'answerCallbackQuery', { callback_query_id: cq.id });
+    } catch {
+      // ignore
+    }
 
-    if (data === 'link:prev') {
-      const active = await getActiveCode(env, chatId);
-      if (active) {
-        await sendLinkMessage(env, chatId, active, false);
-      } else {
-        const code = await createInvite(env, chatId, cq.from || {});
-        await sendLinkMessage(env, chatId, code, true);
+    if (cq.message?.message_id) {
+      try {
+        await tg(env, 'editMessageReplyMarkup', {
+          chat_id: chatId,
+          message_id: cq.message.message_id,
+          reply_markup: { inline_keyboard: [] },
+        });
+      } catch {
+        // ignore
       }
-      return;
     }
 
     if (data === 'link:new') {
-      const code = await createInvite(env, chatId, cq.from || {});
-      await sendLinkMessage(env, chatId, code, true);
-      return;
+      await askForAlias(env, chatId);
     }
     return;
   }
 
   const msg = update.message || update.edited_message;
   if (!msg?.chat) return;
+  const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
-  if (!text.startsWith('/start')) return;
+  if (!text) return;
 
-  const active = await getActiveCode(env, msg.chat.id);
-  if (active) {
-    // Ask instead of auto-creating another link
-    await askLinkChoice(env, msg.chat.id, active);
+  // Alias reply
+  const state = await getChatState(env, chatId);
+  if (state?.pending === 'await_alias' && !text.startsWith('/')) {
+    const alias = text.slice(0, 64);
+    await clearChatPending(env, chatId);
+    const code = await createInvite(env, chatId, msg.from || {}, alias);
+    await sendLinkMessage(env, chatId, code);
     return;
   }
 
-  const code = await createInvite(env, msg.chat.id, msg.from || {});
-  await sendLinkMessage(env, msg.chat.id, code, true);
+  if (text.startsWith('/start') || text === '/new' || text === 'لینک جدید') {
+    // Always reset alias prompt state on /start so the bot never looks "stuck"
+    await clearChatPending(env, chatId);
+    await showActiveOrAsk(env, chatId);
+  }
 }
 
 async function getInvite(env, code) {
   try {
-    requireKv(env);
+    requireDb(env);
   } catch (e) {
     return json({ ok: false, error: e.message }, 500);
   }
-  const record = await env.INVITES.get(`code:${code}`, 'json');
-  if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
+  const record = await getInviteRow(env, code);
+  if (!record || record.burned || record.completed) {
+    // completed invites can still open the form historically; burned should 404
+    if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
+    if (record.burned) return json({ ok: false, error: 'invite_burned' }, 410);
+  }
   return json({
     ok: true,
     inviteId: code,
-    ownerName: record.firstName || record.username || '',
+    ownerName: record.first_name || record.username || '',
+    // alias intentionally omitted — owner-only
   });
 }
 
 async function handleNotify(request, env) {
   try {
-    requireKv(env);
+    requireDb(env);
     const body = await request.json();
     const inviteId = body.inviteId || body.i;
     if (!inviteId) return json({ ok: false, error: 'inviteId_required' }, 400);
-    const record = await env.INVITES.get(`code:${String(inviteId)}`, 'json');
+    const record = await getInviteRow(env, String(inviteId));
     if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
+    if (record.burned) return json({ ok: false, error: 'invite_burned' }, 410);
 
     const dateLabel = body?.date?.label || '—';
     const weekday = body?.date?.weekdayFa || '';
     const time = body?.time?.label || '—';
     const order = body?.order?.label || '—';
     const emoji = body?.order?.emoji || '💕';
+    const code = String(inviteId);
+    const link = await resolveShareLink(env, code);
+    const alias = (record.alias || '').trim() || '—';
     const text = [
       'خبر خوب! جواب مثبت ثبت شد 🎉',
+      '',
+      `🏷 برای: ${alias}`,
+      `🔗 لینک:`,
+      link,
+      `کد دعوت: ${code}`,
       '',
       `📅 ${weekday} ${dateLabel}`.trim(),
       `⏰ ساعت ${time}`,
@@ -365,16 +665,18 @@ async function handleNotify(request, env) {
     ].join('\n');
 
     const result = await tg(env, 'sendMessage', {
-      chat_id: record.chatId,
+      chat_id: record.chat_id,
       text,
       disable_web_page_preview: true,
     });
     if (!result.ok) return json({ ok: false, error: result.description || 'telegram_error' }, 502);
 
-    // Mark invite as used so next /start gets a fresh link
-    record.completed = true;
-    record.completedAt = new Date().toISOString();
-    await env.INVITES.put(`code:${String(inviteId)}`, JSON.stringify(record));
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `UPDATE invites SET completed = 1, completed_at = ?, updated_at = ? WHERE code = ?`
+    )
+      .bind(now, now, code)
+      .run();
 
     return json({ ok: true });
   } catch (e) {
@@ -383,9 +685,13 @@ async function handleNotify(request, env) {
 }
 
 async function pollUpdates(env) {
-  if (!token(env) || !env.INVITES) return;
-  const offsetRaw = await env.INVITES.get('meta:update_offset');
-  let offset = offsetRaw ? Number(offsetRaw) : 0;
+  if (!token(env) || !env.DB) return;
+  let offset = 0;
+  try {
+    offset = Number((await metaGet(env, 'update_offset')) || 0);
+  } catch {
+    return;
+  }
   const data = await tg(env, 'getUpdates', {
     offset,
     timeout: 0,
@@ -396,5 +702,5 @@ async function pollUpdates(env) {
     offset = update.update_id + 1;
     await handleBotUpdate(env, update);
   }
-  await env.INVITES.put('meta:update_offset', String(offset));
+  await metaPut(env, 'update_offset', String(offset));
 }

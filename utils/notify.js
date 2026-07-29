@@ -17,7 +17,7 @@ export async function fetchInvite(inviteId) {
   const res = await fetch(`${BRIDGE}/invite/${encodeURIComponent(inviteId)}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
-    return { ok: false, error: data.error || 'invite_not_found' };
+    return { ok: false, error: data.error || (res.status === 410 ? 'invite_burned' : 'invite_not_found') };
   }
   return data;
 }

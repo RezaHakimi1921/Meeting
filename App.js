@@ -42,7 +42,7 @@ export default function App() {
       }
       const meta = await fetchInvite(id);
       if (!meta.ok) {
-        setInviteError('invalid');
+        setInviteError(meta.error === 'invite_burned' ? 'burned' : 'invalid');
         setReady(true);
         return;
       }
@@ -170,7 +170,15 @@ export default function App() {
       <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
         <BackgroundHearts />
         <View style={styles.frame}>
-          <StartGateCard reason={inviteError === 'invalid' ? 'invalid' : 'missing'} />
+          <StartGateCard
+            reason={
+              inviteError === 'burned'
+                ? 'burned'
+                : inviteError === 'invalid'
+                  ? 'invalid'
+                  : 'missing'
+            }
+          />
         </View>
         <StatusBar style="dark" />
       </LinearGradient>

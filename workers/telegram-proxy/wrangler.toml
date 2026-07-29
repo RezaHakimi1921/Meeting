@@ -3,16 +3,18 @@ main = "src/index.js"
 compatibility_date = "2024-11-01"
 workers_dev = true
 
-[[kv_namespaces]]
-binding = "INVITES"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_KV_NAMESPACE_ID"
+# Create D1 in dashboard, then paste database_id here (optional for local wrangler)
+[[d1_databases]]
+binding = "DB"
+database_name = "meeting-invites"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 [triggers]
 crons = ["* * * * *"]
 
 [vars]
-PUBLIC_BASE_URL = "http://94.182.92.79/meeting"
+PUBLIC_BASE_URL = ""
+ORIGIN_HINT = "http://94.182.92.79"
 BOT_USERNAME = "Meetingir_mir_bot"
 
 [observability]

@@ -9,9 +9,11 @@ export default function StartGateCard({ reason }) {
       <Text style={styles.emoji}>💌</Text>
       <Text style={styles.title}>برای شروع، لینک اختصاصی لازم است</Text>
       <Text style={styles.body}>
-        {reason === 'invalid'
-          ? 'این لینک معتبر نیست یا منقضی شده. صاحب دعوت باید از ربات لینک جدید بگیره.'
-          : 'هر نفر اول باید بره تو ربات، دستور /start بزنه و لینک شخصی خودش رو بگیره، بعد همون لینک رو برای طرف مقابل بفرسته.'}
+        {reason === 'burned'
+          ? 'این لینک سوخته؛ صاحب دعوت لینک جدید ساخته. ازش بخواه لینک تازه بفرسته.'
+          : reason === 'invalid'
+            ? 'این لینک معتبر نیست یا منقضی شده. صاحب دعوت باید از ربات لینک جدید بگیره.'
+            : 'هر نفر اول باید بره تو ربات، دستور /start بزنه و لینک شخصی خودش رو بگیره، بعد همون لینک رو برای طرف مقابل بفرسته.'}
       </Text>
       <Pressable onPress={() => Linking.openURL(BOT_URL)} style={styles.btn}>
         <Text style={styles.btnText}>ورود به ربات و گرفتن لینک 💌</Text>

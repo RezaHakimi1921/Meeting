@@ -27,7 +27,7 @@ export default function TimePickerCard({ onNext, initialTime }) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>ساعت چند بیام دنبالت؟</Text>
+      <Text style={styles.title}>ساعت چند بریم بیرون؟</Text>
       <Text style={styles.subtitle}>یه ساعت قشنگ انتخاب کن، سر وقت می‌رسم ⏰</Text>
 
       <Text style={styles.preview}>{labelFa}</Text>
