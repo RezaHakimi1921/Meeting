@@ -1,3 +1,7 @@
+const BRIDGE =
+  (typeof window !== 'undefined' && window.__MEETING_BRIDGE__) ||
+  'https://nameless-feather-4353.rezahakimi1921.workers.dev';
+
 function getInviteIdFromLocation() {
   if (typeof window === 'undefined') return null;
   try {
@@ -10,7 +14,7 @@ function getInviteIdFromLocation() {
 }
 
 export async function fetchInvite(inviteId) {
-  const res = await fetch(`/notify/invite/${encodeURIComponent(inviteId)}`);
+  const res = await fetch(`${BRIDGE}/invite/${encodeURIComponent(inviteId)}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) {
     return { ok: false, error: data.error || 'invite_not_found' };
@@ -20,7 +24,7 @@ export async function fetchInvite(inviteId) {
 
 export async function notifyInviteAccepted(payload) {
   try {
-    const res = await fetch('/notify', {
+    const res = await fetch(`${BRIDGE}/notify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -37,4 +41,4 @@ export async function notifyInviteAccepted(payload) {
   }
 }
 
-export { getInviteIdFromLocation };
+export { getInviteIdFromLocation, BRIDGE };

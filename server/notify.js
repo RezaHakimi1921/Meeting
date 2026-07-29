@@ -157,7 +157,7 @@ async function tg(method, body) {
 
 function curlJson(url, payload) {
   return new Promise((resolve, reject) => {
-    const args = ['-sS', '--max-time', '30', '-X', 'POST', url, '-H', 'Content-Type: application/json', '-d', payload];
+    const args = ['-4', '-sS', '--max-time', '30', '-X', 'POST', url, '-H', 'Content-Type: application/json', '-d', payload];
     if (PROXY) {
       args.unshift('-x', PROXY);
     }
@@ -273,7 +273,7 @@ async function pollTelegram() {
 
 function curlGetJson(url) {
   return new Promise((resolve, reject) => {
-    const args = ['-sS', '--max-time', '35', url];
+    const args = ['-4', '-sS', '--max-time', '35', url];
     if (PROXY) args.unshift('-x', PROXY);
     const child = spawn('curl', args);
     let out = '';
