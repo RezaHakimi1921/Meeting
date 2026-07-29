@@ -3,7 +3,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radii, spacing } from '../theme';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
 
-const SHARE_URL = 'https://94-182-92-79.sslip.io/meeting';
+const SHARE_URL = 'http://94.182.92.79/meeting';
 const CONFETTI = ['🎉', '✨', '💕', '💗', '🌸', '💖', '⭐', '🎀'];
 
 function ConfettiBurst() {

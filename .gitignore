@@ -32,6 +32,11 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+
+# local deploy helpers that may use secrets via env
+deploy/upload_dist.py
+deploy/*_local.py
 
 # typescript
 *.tsbuildinfo
