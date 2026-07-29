@@ -32,8 +32,16 @@ export default {
             hasToken: Boolean(token(env)),
             hasKv: Boolean(env.INVITES),
             publicBase: publicBase(env),
+            workerPublic: workerPublic(env),
           })
         );
+      }
+
+      // Short redirect: /r/CODE → meeting page (hides server IP in shared links)
+      const redirectMatch = url.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)$/);
+      if (request.method === 'GET' && redirectMatch) {
+        const dest = `${publicBase(env)}?i=${encodeURIComponent(redirectMatch[1])}`;
+        return Response.redirect(dest, 302);
       }
 
       // Telegram sends updates here after setWebhook
@@ -113,6 +121,49 @@ function publicBase(env) {
   return (env.PUBLIC_BASE_URL || 'http://94.182.92.79/meeting').replace(/\/$/, '');
 }
 
+function workerPublic(env) {
+  return (env.WORKER_PUBLIC_URL || 'https://nameless-feather-4353.rezahakimi1921.workers.dev').replace(
+    /\/$/,
+    ''
+  );
+}
+
+/** Bridge URL on Worker (no server IP in the text). */
+function bridgeLink(env, code) {
+  return `${workerPublic(env)}/r/${encodeURIComponent(code)}`;
+}
+
+/**
+ * Prefer a shortener (is.gd). Fallback to Worker /r/CODE.
+ * B2n.ir has no public API for bots, so we cannot call it automatically.
+ */
+async function resolveShareLink(env, code) {
+  requireKv(env);
+  const record = (await env.INVITES.get(`code:${code}`, 'json')) || null;
+  if (record?.shortUrl) return record.shortUrl;
+
+  const bridge = bridgeLink(env, code);
+  let shortUrl = bridge;
+
+  try {
+    const res = await fetch(
+      `https://is.gd/create.php?format=json&url=${encodeURIComponent(bridge)}`,
+      { method: 'GET' }
+    );
+    const data = await res.json();
+    if (data && data.shorturl) shortUrl = data.shorturl;
+  } catch {
+    // keep bridge fallback
+  }
+
+  if (record) {
+    record.shortUrl = shortUrl;
+    record.updatedAt = new Date().toISOString();
+    await env.INVITES.put(`code:${code}`, JSON.stringify(record));
+  }
+  return shortUrl;
+}
+
 function requireKv(env) {
   if (!env.INVITES) {
     throw new Error('KV binding INVITES is missing. Add it in Worker Settings → Bindings.');
@@ -150,7 +201,7 @@ function makeCode() {
 }
 
 function inviteLink(env, code) {
-  return `${publicBase(env)}?i=${encodeURIComponent(code)}`;
+  return bridgeLink(env, code);
 }
 
 async function getActiveCode(env, chatId) {
@@ -182,7 +233,7 @@ async function createInvite(env, chatId, from = {}) {
 }
 
 async function sendLinkMessage(env, chatId, code, isNew) {
-  const link = inviteLink(env, code);
+  const link = await resolveShareLink(env, code);
   const title = isNew ? 'سلام 💕 لینک جدیدت آماده‌ست.' : 'سلام 💕 لینک قبلی‌ت هنوز آماده‌ست.';
   const text = [
     title,
@@ -201,7 +252,7 @@ async function sendLinkMessage(env, chatId, code, isNew) {
 }
 
 async function askLinkChoice(env, chatId, activeCode) {
-  const link = inviteLink(env, activeCode);
+  const link = await resolveShareLink(env, activeCode);
   await tg(env, 'sendMessage', {
     chat_id: chatId,
     text: [
