@@ -4,17 +4,25 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import BackgroundHearts from './components/BackgroundHearts';
 import ProgressBar from './components/ProgressBar';
+import StepHeader from './components/StepHeader';
+import StartGateCard from './components/StartGateCard';
 import IntroCard from './components/IntroCard';
 import DatePickerCard from './components/DatePickerCard';
 import TimePickerCard from './components/TimePickerCard';
 import OrderPickerCard from './components/OrderPickerCard';
 import FinalCard from './components/FinalCard';
 import { clearInvite, loadInvite, saveInvite } from './storage';
-import { notifyInviteAccepted } from './utils/notify';
+import {
+  fetchInvite,
+  getInviteIdFromLocation,
+  notifyInviteAccepted,
+} from './utils/notify';
 import { colors, spacing } from './theme';
 
 export default function App() {
   const [ready, setReady] = useState(false);
+  const [inviteId, setInviteId] = useState(null);
+  const [inviteError, setInviteError] = useState(null); // null | 'missing' | 'invalid'
   const [step, setStep] = useState(1);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
@@ -24,7 +32,21 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const saved = await loadInvite();
+      const id = getInviteIdFromLocation();
+      if (!id) {
+        setInviteError('missing');
+        setReady(true);
+        return;
+      }
+      const meta = await fetchInvite(id);
+      if (!meta.ok) {
+        setInviteError('invalid');
+        setReady(true);
+        return;
+      }
+      setInviteId(id);
+
+      const saved = await loadInvite(id);
       if (saved?.completed) {
         setSelectedDate(saved.selectedDate ?? null);
         setSelectedTime(saved.selectedTime ?? null);
@@ -58,6 +80,7 @@ export default function App() {
   };
 
   const persist = async (partial) => {
+    if (!inviteId) return;
     const payload = {
       selectedDate,
       selectedTime,
@@ -65,7 +88,12 @@ export default function App() {
       completed: false,
       ...partial,
     };
-    await saveInvite(payload);
+    await saveInvite(inviteId, payload);
+  };
+
+  const handleBack = () => {
+    if (step <= 1) return;
+    animateTo(step - 1);
   };
 
   const handleYes = () => animateTo(2);
@@ -92,21 +120,22 @@ export default function App() {
       completedAt: new Date().toISOString(),
       notified: false,
     };
-    await saveInvite(payload);
+    await saveInvite(inviteId, payload);
     animateTo(5);
 
     const ok = await notifyInviteAccepted({
+      inviteId,
       date: selectedDate,
       time: selectedTime,
       order,
     });
     if (ok) {
-      await saveInvite({ ...payload, notified: true });
+      await saveInvite(inviteId, { ...payload, notified: true });
     }
   };
 
   const handleReset = async () => {
-    await clearInvite();
+    await clearInvite(inviteId);
     setSelectedDate(null);
     setSelectedTime(null);
     setSelectedOrder(null);
@@ -117,10 +146,23 @@ export default function App() {
     return <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root} />;
   }
 
+  if (inviteError) {
+    return (
+      <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
+        <BackgroundHearts />
+        <View style={styles.frame}>
+          <StartGateCard reason={inviteError === 'invalid' ? 'invalid' : 'missing'} />
+        </View>
+        <StatusBar style="dark" />
+      </LinearGradient>
+    );
+  }
+
   return (
     <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
       <BackgroundHearts />
       <View style={styles.frame}>
+        <StepHeader step={step} total={5} onBack={handleBack} />
         <ProgressBar step={step} total={5} />
         <Animated.View style={{ opacity: fade, transform: [{ translateY: slide }] }}>
           {step === 1 ? <IntroCard onYes={handleYes} /> : null}

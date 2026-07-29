@@ -10,6 +10,8 @@ EnvironmentFile=/home/cursor/meeting-notify/.env
 ExecStart=/usr/bin/node /home/cursor/meeting-notify/notify.js
 Restart=always
 RestartSec=3
+# Long-polling needs network; keep process alive
+TimeoutStartSec=20
 
 [Install]
 WantedBy=multi-user.target

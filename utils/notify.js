@@ -1,7 +1,23 @@
-/**
- * Fire-and-forget notify to server-side Telegram bridge.
- * Never sends bot token from the client.
- */
+function getInviteIdFromLocation() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const i = params.get('i') || params.get('invite');
+    return i ? String(i).trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchInvite(inviteId) {
+  const res = await fetch(`/notify/invite/${encodeURIComponent(inviteId)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    return { ok: false, error: data.error || 'invite_not_found' };
+  }
+  return data;
+}
+
 export async function notifyInviteAccepted(payload) {
   try {
     const res = await fetch('/notify', {
@@ -20,3 +36,5 @@ export async function notifyInviteAccepted(payload) {
     return false;
   }
 }
+
+export { getInviteIdFromLocation };
