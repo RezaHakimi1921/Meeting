@@ -135,7 +135,7 @@ async function registerWebhook(env, origin) {
     const hook = `${origin}/telegram-webhook`;
     const result = await tg(env, 'setWebhook', {
       url: hook,
-      allowed_updates: ['message'],
+      allowed_updates: ['message', 'callback_query'],
       drop_pending_updates: true,
     });
     return json({ ok: Boolean(result.ok), hook, result });
@@ -149,16 +149,24 @@ function makeCode() {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function ensureInvite(env, chatId, from = {}) {
+function inviteLink(env, code) {
+  return `${publicBase(env)}?i=${encodeURIComponent(code)}`;
+}
+
+async function getActiveCode(env, chatId) {
+  requireKv(env);
+  const existing = await env.INVITES.get(`chat:${String(chatId)}`, 'json');
+  if (!existing?.code) return null;
+  const record = await env.INVITES.get(`code:${existing.code}`, 'json');
+  if (!record || record.completed) return null;
+  return existing.code;
+}
+
+async function createInvite(env, chatId, from = {}) {
   requireKv(env);
   const chatKey = String(chatId);
-
-  // Always mint a NEW invite code on every /start.
-  // (Do not reuse previous links, even if unused.)
   let code = makeCode();
-  while (await env.INVITES.get(`code:${code}`)) {
-    code = makeCode();
-  }
+  while (await env.INVITES.get(`code:${code}`)) code = makeCode();
 
   const record = {
     chatId: chatKey,
@@ -173,16 +181,11 @@ async function ensureInvite(env, chatId, from = {}) {
   return code;
 }
 
-async function handleBotUpdate(env, update) {
-  const msg = update.message || update.edited_message;
-  if (!msg?.chat) return;
-  const text = (msg.text || '').trim();
-  if (!text.startsWith('/start')) return;
-
-  const code = await ensureInvite(env, msg.chat.id, msg.from || {});
-  const link = `${publicBase(env)}?i=${encodeURIComponent(code)}`;
-  const reply = [
-    'سلام 💕 لینک جدیدت آماده‌ست.',
+async function sendLinkMessage(env, chatId, code, isNew) {
+  const link = inviteLink(env, code);
+  const title = isNew ? 'سلام 💕 لینک جدیدت آماده‌ست.' : 'سلام 💕 لینک قبلی‌ت هنوز آماده‌ست.';
+  const text = [
+    title,
     '',
     'این لینک رو برای کسی که دوست داری بفرست.',
     'وقتی جواب «آره» بده و فرم رو تموم کنه، همینجا برات می‌فرستم.',
@@ -191,10 +194,79 @@ async function handleBotUpdate(env, update) {
   ].join('\n');
 
   await tg(env, 'sendMessage', {
-    chat_id: msg.chat.id,
-    text: reply,
+    chat_id: chatId,
+    text,
     disable_web_page_preview: true,
   });
+}
+
+async function askLinkChoice(env, chatId, activeCode) {
+  const link = inviteLink(env, activeCode);
+  await tg(env, 'sendMessage', {
+    chat_id: chatId,
+    text: [
+      'سلام 💕',
+      '',
+      'یه لینک استفاده‌نشده داری:',
+      link,
+      '',
+      'چی می‌خوای؟',
+    ].join('\n'),
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: 'لینک قبلی 🔗', callback_data: 'link:prev' },
+          { text: 'لینک جدید ✨', callback_data: 'link:new' },
+        ],
+      ],
+    },
+  });
+}
+
+async function handleBotUpdate(env, update) {
+  // Inline button presses
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    const chatId = cq.message?.chat?.id;
+    const data = cq.data || '';
+    if (!chatId) return;
+
+    await tg(env, 'answerCallbackQuery', { callback_query_id: cq.id });
+
+    if (data === 'link:prev') {
+      const active = await getActiveCode(env, chatId);
+      if (active) {
+        await sendLinkMessage(env, chatId, active, false);
+      } else {
+        const code = await createInvite(env, chatId, cq.from || {});
+        await sendLinkMessage(env, chatId, code, true);
+      }
+      return;
+    }
+
+    if (data === 'link:new') {
+      const code = await createInvite(env, chatId, cq.from || {});
+      await sendLinkMessage(env, chatId, code, true);
+      return;
+    }
+    return;
+  }
+
+  const msg = update.message || update.edited_message;
+  if (!msg?.chat) return;
+  const text = (msg.text || '').trim();
+  if (!text.startsWith('/start')) return;
+
+  const active = await getActiveCode(env, msg.chat.id);
+  if (active) {
+    // Ask instead of auto-creating another link
+    await askLinkChoice(env, msg.chat.id, active);
+    return;
+  }
+
+  const code = await createInvite(env, msg.chat.id, msg.from || {});
+  await sendLinkMessage(env, msg.chat.id, code, true);
 }
 
 async function getInvite(env, code) {
@@ -259,7 +331,7 @@ async function pollUpdates(env) {
   const data = await tg(env, 'getUpdates', {
     offset,
     timeout: 0,
-    allowed_updates: ['message'],
+    allowed_updates: ['message', 'callback_query'],
   });
   if (!data.ok) return;
   for (const update of data.result || []) {
