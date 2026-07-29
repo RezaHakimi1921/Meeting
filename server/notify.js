@@ -24,6 +24,9 @@ const TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || 'http://94.182.92.79/meeting').replace(/\/$/, '');
 const BOT_USERNAME = (process.env.BOT_USERNAME || 'Meetingir_mir_bot').replace(/^@/, '');
 const PROXY = process.env.TELEGRAM_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || '';
+// Cloudflare Worker (or any reverse proxy) base — no trailing slash.
+// Example: https://telegram-proxy.xxxx.workers.dev
+const API_BASE = (process.env.TELEGRAM_API_BASE || 'https://api.telegram.org').replace(/\/$/, '');
 const INVITES_FILE =
   process.env.INVITES_FILE || path.join(__dirname, 'invites.json');
 
@@ -113,7 +116,7 @@ async function tg(method, body) {
     err.code = 'NO_CREDENTIALS';
     throw err;
   }
-  const url = `https://api.telegram.org/bot${TOKEN}/${method}`;
+  const url = `${API_BASE}/bot${TOKEN}/${method}`;
   const payload = JSON.stringify(body || {});
 
   // Prefer curl when proxy is configured (common on restricted networks).
@@ -246,7 +249,7 @@ async function pollTelegram() {
     try {
       // Use curl for getUpdates — more reliable on restricted DNS/networks than node fetch.
       const data = await curlGetJson(
-        `https://api.telegram.org/bot${TOKEN}/getUpdates?timeout=25&offset=${offset}`
+        `${API_BASE}/bot${TOKEN}/getUpdates?timeout=25&offset=${offset}`
       );
       if (!data.ok) {
         console.warn('getUpdates not ok', data);
@@ -353,7 +356,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(
-    `notify listening on 127.0.0.1:${PORT} configured=${Boolean(TOKEN)} bot=@${BOT_USERNAME}`
+    `notify listening on 127.0.0.1:${PORT} configured=${Boolean(TOKEN)} bot=@${BOT_USERNAME} api=${API_BASE}`
   );
   pollTelegram().catch((e) => console.error('poll crashed', e));
 });

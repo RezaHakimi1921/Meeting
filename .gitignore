@@ -35,8 +35,8 @@ yarn-error.*
 .env
 
 # local deploy helpers that may use secrets via env
-deploy/upload_dist.py
-deploy/*_local.py
+workers/telegram-proxy/node_modules/
+workers/telegram-proxy/.wrangler/
 
 # typescript
 *.tsbuildinfo
