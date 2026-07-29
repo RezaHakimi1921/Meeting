@@ -1,7 +1,7 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radii, spacing } from '../theme';
 
-const BOT_URL = 'https://t.me/Meetingir_mir_bot';
+const BOT_URL = 'https://B2n.ir/md3187'; // short entry → must redirect to t.me/Meetingir_mir_bot
 
 export default function StartGateCard({ reason }) {
   return (
@@ -14,9 +14,9 @@ export default function StartGateCard({ reason }) {
           : 'هر نفر اول باید بره تو ربات، دستور /start بزنه و لینک شخصی خودش رو بگیره، بعد همون لینک رو برای طرف مقابل بفرسته.'}
       </Text>
       <Pressable onPress={() => Linking.openURL(BOT_URL)} style={styles.btn}>
-        <Text style={styles.btnText}>ورود به ربات @Meetingir_mir_bot</Text>
+        <Text style={styles.btnText}>ورود به ربات و گرفتن لینک 💌</Text>
       </Pressable>
-      <Text style={styles.foot}>بعد از /start لینک آماده می‌شه 💕</Text>
+      <Text style={styles.foot}>از لینک کوتاه B2n وارد ربات شو، بعد /start بزن 💕</Text>
     </View>
   );
 }

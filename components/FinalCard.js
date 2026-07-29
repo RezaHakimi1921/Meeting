@@ -3,7 +3,7 @@ import { Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-nati
 import { colors, radii, spacing } from '../theme';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
 
-const BOT_URL = 'https://t.me/Meetingir_mir_bot';
+const BOT_URL = 'https://B2n.ir/md3187'; // short entry → must redirect to t.me/Meetingir_mir_bot
 const CONFETTI = ['🎉', '✨', '💕', '💗', '🌸', '💖', '⭐', '🎀'];
 
 function ConfettiBurst() {

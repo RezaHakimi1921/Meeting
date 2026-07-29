@@ -134,14 +134,15 @@ function bridgeLink(env, code) {
 }
 
 /**
- * Prefer a shortener (is.gd). Fallback to Worker /r/CODE.
- * B2n.ir has no public API for bots, so we cannot call it automatically.
+ * Prefer Worker /r/CODE (no server IP). Optional is.gd on top.
+ * B2n.ir cannot be automated (Cloudflare challenge, no public API).
  */
 async function resolveShareLink(env, code) {
   requireKv(env);
   const record = (await env.INVITES.get(`code:${code}`, 'json')) || null;
   if (record?.shortUrl) return record.shortUrl;
 
+  // Never expose server IP in Telegram messages
   const bridge = bridgeLink(env, code);
   let shortUrl = bridge;
 
@@ -153,15 +154,21 @@ async function resolveShareLink(env, code) {
     const data = await res.json();
     if (data && data.shorturl) shortUrl = data.shorturl;
   } catch {
-    // keep bridge fallback
+    // keep Worker bridge
   }
 
   if (record) {
     record.shortUrl = shortUrl;
+    record.bridgeUrl = bridge;
     record.updatedAt = new Date().toISOString();
     await env.INVITES.put(`code:${code}`, JSON.stringify(record));
   }
   return shortUrl;
+}
+
+function botEntryShort(env) {
+  // Your B2n entry link — must point to https://t.me/Meetingir_mir_bot (NOT the server IP)
+  return (env.B2N_ENTRY_URL || 'https://B2n.ir/md3187').trim();
 }
 
 function requireKv(env) {
