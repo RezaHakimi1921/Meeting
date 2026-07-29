@@ -6,26 +6,19 @@ import BackgroundHearts from './components/BackgroundHearts';
 import ProgressBar from './components/ProgressBar';
 import IntroCard from './components/IntroCard';
 import DatePickerCard from './components/DatePickerCard';
+import TimePickerCard from './components/TimePickerCard';
 import OrderPickerCard from './components/OrderPickerCard';
 import FinalCard from './components/FinalCard';
 import { clearInvite, loadInvite, saveInvite } from './storage';
+import { notifyInviteAccepted } from './utils/notify';
 import { colors, spacing } from './theme';
-
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-function nowClock() {
-  const d = new Date();
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
 
 export default function App() {
   const [ready, setReady] = useState(false);
   const [step, setStep] = useState(1);
   const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedTime, setSelectedTime] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [finalClock, setFinalClock] = useState(null);
   const fade = useRef(new Animated.Value(1)).current;
   const slide = useRef(new Animated.Value(0)).current;
 
@@ -34,13 +27,15 @@ export default function App() {
       const saved = await loadInvite();
       if (saved?.completed) {
         setSelectedDate(saved.selectedDate ?? null);
+        setSelectedTime(saved.selectedTime ?? null);
         setSelectedOrder(saved.selectedOrder ?? null);
-        setFinalClock(saved.finalClock ?? nowClock());
-        setStep(4);
+        setStep(5);
       } else if (saved) {
         setSelectedDate(saved.selectedDate ?? null);
+        setSelectedTime(saved.selectedTime ?? null);
         setSelectedOrder(saved.selectedOrder ?? null);
-        if (saved.selectedOrder) setStep(4);
+        if (saved.selectedOrder) setStep(5);
+        else if (saved.selectedTime) setStep(4);
         else if (saved.selectedDate) setStep(3);
         else setStep(1);
       }
@@ -65,9 +60,9 @@ export default function App() {
   const persist = async (partial) => {
     const payload = {
       selectedDate,
+      selectedTime,
       selectedOrder,
       completed: false,
-      finalClock,
       ...partial,
     };
     await saveInvite(payload);
@@ -81,25 +76,40 @@ export default function App() {
     animateTo(3);
   };
 
+  const handleTimeNext = async (time) => {
+    setSelectedTime(time);
+    await persist({ selectedTime: time });
+    animateTo(4);
+  };
+
   const handleOrderConfirm = async (order) => {
-    const clock = nowClock();
     setSelectedOrder(order);
-    setFinalClock(clock);
-    await saveInvite({
+    const payload = {
       selectedDate,
+      selectedTime,
       selectedOrder: order,
       completed: true,
       completedAt: new Date().toISOString(),
-      finalClock: clock,
+      notified: false,
+    };
+    await saveInvite(payload);
+    animateTo(5);
+
+    const ok = await notifyInviteAccepted({
+      date: selectedDate,
+      time: selectedTime,
+      order,
     });
-    animateTo(4);
+    if (ok) {
+      await saveInvite({ ...payload, notified: true });
+    }
   };
 
   const handleReset = async () => {
     await clearInvite();
     setSelectedDate(null);
+    setSelectedTime(null);
     setSelectedOrder(null);
-    setFinalClock(null);
     animateTo(1);
   };
 
@@ -111,16 +121,19 @@ export default function App() {
     <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
       <BackgroundHearts />
       <View style={styles.frame}>
-        <ProgressBar step={step} total={4} />
+        <ProgressBar step={step} total={5} />
         <Animated.View style={{ opacity: fade, transform: [{ translateY: slide }] }}>
           {step === 1 ? <IntroCard onYes={handleYes} /> : null}
           {step === 2 ? <DatePickerCard onNext={handleDateNext} /> : null}
-          {step === 3 ? <OrderPickerCard onConfirm={handleOrderConfirm} /> : null}
-          {step === 4 ? (
+          {step === 3 ? (
+            <TimePickerCard onNext={handleTimeNext} initialTime={selectedTime} />
+          ) : null}
+          {step === 4 ? <OrderPickerCard onConfirm={handleOrderConfirm} /> : null}
+          {step === 5 ? (
             <FinalCard
               selectedDate={selectedDate}
+              selectedTime={selectedTime}
               selectedOrder={selectedOrder}
-              finalClock={finalClock}
               onReset={handleReset}
             />
           ) : null}

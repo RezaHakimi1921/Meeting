@@ -1,14 +1,11 @@
-# Date Invite is served by the existing Caddy container (arte-caddy).
-# Port 80 is already owned by Caddy+Kestrel — do not bind a separate Nginx :80.
-#
-# Static files: /var/www/meeting  (mounted into container as /srv/meeting)
-# Public URL:   http://94.182.92.79/meeting
-#
-# HTTPS via Let's Encrypt failed on this host (DNS to ACME blocked/unreliable).
-# Keep HTTP until DNS/ACME works or a real domain+working resolver is available.
+# Date Invite front + Telegram notify bridge via Caddy
 
 :80 {
 	encode gzip
+
+	handle /notify* {
+		reverse_proxy 127.0.0.1:3847
+	}
 
 	handle /meeting* {
 		root * /srv

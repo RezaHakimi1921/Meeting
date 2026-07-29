@@ -54,12 +54,13 @@ function ConfettiPiece({ emoji, left, delay, drift }) {
   );
 }
 
-export default function FinalCard({ selectedDate, selectedOrder, finalClock, onReset }) {
+export default function FinalCard({ selectedDate, selectedTime, selectedOrder, onReset }) {
   const shareScale = useRef(new Animated.Value(1)).current;
+  const clock = selectedTime?.labelFa || selectedTime?.label || '';
 
-  const message = `خوشحالم نگفتی نه! پس ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${finalClock ?? ''}، دنبالت میام برای ${selectedOrder?.label ?? ''} 🚗`;
+  const message = `خوشحالم نگفتی نه! پس ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock}، دنبالت میام برای ${selectedOrder?.label ?? ''} 🚗`;
 
-  const shareText = `دعوت به قرار 💕 ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} — ${selectedOrder?.emoji ?? ''} ${selectedOrder?.label ?? ''}\nمنتظرتم با لبخند 🌸\n${SHARE_URL}`;
+  const shareText = `دعوت به قرار 💕 ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock} — ${selectedOrder?.emoji ?? ''} ${selectedOrder?.label ?? ''}\nمنتظرتم با لبخند 🌸\n${SHARE_URL}`;
 
   const handleShare = async () => {
     bounce(shareScale);
