@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.7",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "babel-preset-expo": "~57.0.0",
     "expo": "~57.0.8",
     "expo-linear-gradient": "~57.0.1",
     "expo-status-bar": "~57.0.1",
@@ -22,7 +24,9 @@
   },
   "jest": {
     "testEnvironment": "node",
-    "testMatch": ["**/*.test.js"],
+    "testMatch": [
+      "**/*.test.js"
+    ],
     "transform": {}
   },
   "private": true,
