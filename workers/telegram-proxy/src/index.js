@@ -152,23 +152,14 @@ function makeCode() {
 async function ensureInvite(env, chatId, from = {}) {
   requireKv(env);
   const chatKey = String(chatId);
-  const existing = await env.INVITES.get(`chat:${chatKey}`, 'json');
 
-  // Active unused link → reuse.
-  // Used/completed (or missing) → create a brand-new link.
-  if (existing?.code) {
-    const record = (await env.INVITES.get(`code:${existing.code}`, 'json')) || null;
-    if (record && !record.completed) {
-      record.username = from.username || record.username || '';
-      record.firstName = from.first_name || record.firstName || '';
-      record.updatedAt = new Date().toISOString();
-      await env.INVITES.put(`code:${existing.code}`, JSON.stringify(record));
-      return existing.code;
-    }
+  // Always mint a NEW invite code on every /start.
+  // (Do not reuse previous links, even if unused.)
+  let code = makeCode();
+  while (await env.INVITES.get(`code:${code}`)) {
+    code = makeCode();
   }
 
-  let code = makeCode();
-  while (await env.INVITES.get(`code:${code}`)) code = makeCode();
   const record = {
     chatId: chatKey,
     username: from.username || '',
@@ -191,7 +182,7 @@ async function handleBotUpdate(env, update) {
   const code = await ensureInvite(env, msg.chat.id, msg.from || {});
   const link = `${publicBase(env)}?i=${encodeURIComponent(code)}`;
   const reply = [
-    'سلام 💕 لینک اختصاصی دعوت‌نامه‌ات آماده‌ست.',
+    'سلام 💕 لینک جدیدت آماده‌ست.',
     '',
     'این لینک رو برای کسی که دوست داری بفرست.',
     'وقتی جواب «آره» بده و فرم رو تموم کنه، همینجا برات می‌فرستم.',
