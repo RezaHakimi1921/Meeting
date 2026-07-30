@@ -13,7 +13,7 @@ database_id = "REPLACE_WITH_D1_DATABASE_ID"
 crons = ["* * * * *"]
 
 [vars]
-PUBLIC_BASE_URL = ""
+PUBLIC_BASE_URL = "https://bold-frog-8303.zerodeploy.app"
 ORIGIN_HINT = "http://94.182.92.79"
 BOT_USERNAME = "Meetingir_mir_bot"
 

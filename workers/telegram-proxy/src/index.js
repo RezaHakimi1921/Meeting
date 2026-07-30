@@ -3,12 +3,13 @@
  *
  * Dashboard bindings / vars:
  *   Secret: TELEGRAM_BOT_TOKEN
- *   Vars:   PUBLIC_BASE_URL = https://<neutral-host>   (no IP, no workers.dev name)
+ *   Vars:   PUBLIC_BASE_URL = https://bold-frog-8303.zerodeploy.app
  *           ORIGIN_HINT = http://94.182.92.79
  *           BOT_USERNAME = Meetingir_mir_bot
  *   D1:     binding name must be exactly DB
  *
- * Run schema.sql once in D1 Console (Execute).
+ * Clear PUBLIC_BASE_URL if it still points at a raw IP.
+ * Run schema.sql once in D1 Console (or POST /init-db).
  */
 export default {
   async fetch(request, env, ctx) {
@@ -35,16 +36,11 @@ export default {
         );
       }
 
-      // /r/CODE → open the meeting page.
-      // Note: Workers cannot fetch() raw IPs (CF error 1003), so we redirect the browser.
+      // /r/CODE → clean public meeting page
       const redirectMatch = url.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)$/);
       if (request.method === 'GET' && redirectMatch) {
         const code = redirectMatch[1];
         const base = await resolvePublicBase(env);
-        // Prefer clean public base; if that still points at Worker /meeting, go straight to origin host
-        if (base.includes('workers.dev')) {
-          return Response.redirect(`${originHint(env)}/meeting?i=${encodeURIComponent(code)}`, 302);
-        }
         return Response.redirect(`${base}?i=${encodeURIComponent(code)}`, 302);
       }
 
@@ -201,7 +197,11 @@ function isCleanPublicUrl(url) {
 }
 
 function configuredPublicBase(env) {
-  return (env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  return (
+    env.PUBLIC_BASE_URL ||
+    // Neutral host (no server IP, no personal workers.dev name)
+    'https://bold-frog-8303.zerodeploy.app'
+  ).replace(/\/$/, '');
 }
 
 function requireDb(env) {
@@ -321,8 +321,8 @@ async function resolvePublicBase(env) {
     // ignore (often CF 1003 when ORIGIN_HINT is an IP)
   }
 
-  // Fallback: Worker /r bridge (browser will be redirected to origin)
-  return `${workerPublic(env)}/meeting`;
+  // Fallback: neutral static host (not IP / not personal workers.dev)
+  return 'https://bold-frog-8303.zerodeploy.app';
 }
 
 function inviteOpenLink(base, code) {
@@ -350,13 +350,15 @@ async function resolveShareLink(env, code) {
     return record.short_url;
   }
 
+  // Prefer a clean public base; never put workers.dev / IP / personal name in Telegram text.
   const base = await resolvePublicBase(env);
   let target = inviteOpenLink(base, code);
   if (isDirtyPublicUrl(target)) {
-    target = inviteBridgePath(env, code);
+    // Browser-openable origin page (may be IP). Will be wrapped by shortener below.
+    target = `${originHint(env)}/meeting?i=${encodeURIComponent(code)}`;
   }
 
-  let shortUrl = target;
+  let shortUrl = null;
   for (const api of [
     `https://is.gd/create.php?format=json&url=${encodeURIComponent(target)}`,
     `https://v.gd/create.php?format=json&url=${encodeURIComponent(target)}`,
@@ -371,6 +373,11 @@ async function resolveShareLink(env, code) {
     } catch {
       // try next
     }
+  }
+
+  // Last resort: never send workers.dev with personal account name
+  if (!shortUrl) {
+    shortUrl = isDirtyPublicUrl(target) ? target : target;
   }
 
   if (record) {
@@ -467,7 +474,7 @@ async function createInvite(env, chatId, from = {}, alias = '') {
   while (await getInviteRow(env, code)) code = makeCode();
 
   const now = new Date().toISOString();
-  await burnOpenInvites(env, chatKey);
+  // Keep previous links open — do not burn them
 
   await env.DB.prepare(
     `INSERT INTO invites (
@@ -507,6 +514,19 @@ async function askForAlias(env, chatId) {
   }
 }
 
+async function listOpenInvites(env, chatId) {
+  requireDb(env);
+  const res = await env.DB.prepare(
+    `SELECT * FROM invites
+     WHERE chat_id = ? AND completed = 0
+     ORDER BY created_at DESC
+     LIMIT 20`
+  )
+    .bind(String(chatId))
+    .all();
+  return res?.results || [];
+}
+
 async function sendLinkMessage(env, chatId, code) {
   const row = await getInviteRow(env, code);
   const link = await resolveShareLink(env, code);
@@ -533,25 +553,23 @@ async function sendLinkMessage(env, chatId, code) {
 }
 
 async function showActiveOrAsk(env, chatId) {
-  const active = await getActiveInvite(env, chatId);
-  if (!active) {
+  const open = await listOpenInvites(env, chatId);
+  if (!open.length) {
     await askForAlias(env, chatId);
     return;
   }
 
-  const link = await resolveShareLink(env, active.code);
-  const alias = (active.alias || '').trim() || '—';
+  const lines = ['سلام 💕', '', 'لینک‌های بازت:'];
+  for (const row of open) {
+    const link = await resolveShareLink(env, row.code);
+    const alias = (row.alias || '').trim() || '—';
+    lines.push('', `🏷 برای: ${alias}`, link);
+  }
+  lines.push('', 'اگر لینک جدید می‌خوای، دکمه پایین رو بزن.');
+
   await tg(env, 'sendMessage', {
     chat_id: chatId,
-    text: [
-      'سلام 💕',
-      '',
-      `🏷 برای: ${alias}`,
-      'لینک آماده‌ت اینه (هنوز استفاده نشده):',
-      link,
-      '',
-      'اگر لینک جدید بسازی، لینک قبلی می‌سوزه.',
-    ].join('\n'),
+    text: lines.join('\n'),
     disable_web_page_preview: true,
     reply_markup: {
       inline_keyboard: [[{ text: 'لینک جدید ✨', callback_data: 'link:new' }]],
@@ -620,11 +638,8 @@ async function getInvite(env, code) {
     return json({ ok: false, error: e.message }, 500);
   }
   const record = await getInviteRow(env, code);
-  if (!record || record.burned || record.completed) {
-    // completed invites can still open the form historically; burned should 404
-    if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
-    if (record.burned) return json({ ok: false, error: 'invite_burned' }, 410);
-  }
+  if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
+  // All minted codes stay openable (even if previously marked burned)
   return json({
     ok: true,
     inviteId: code,
@@ -641,7 +656,12 @@ async function handleNotify(request, env) {
     if (!inviteId) return json({ ok: false, error: 'inviteId_required' }, 400);
     const record = await getInviteRow(env, String(inviteId));
     if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
-    if (record.burned) return json({ ok: false, error: 'invite_burned' }, 410);
+    if (record.burned) {
+      // revive previously burned codes so older shared links still open
+      await env.DB.prepare(`UPDATE invites SET burned = 0, updated_at = ? WHERE code = ?`)
+        .bind(new Date().toISOString(), String(inviteId))
+        .run();
+    }
 
     const dateLabel = body?.date?.label || '—';
     const weekday = body?.date?.weekdayFa || '';

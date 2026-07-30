@@ -10,8 +10,12 @@ Date: 2026-07-29
 
 ## Bot flow
 1. `/start` or button «لینک جدید» → ask for Alias text.
-2. Owner replies with Alias → burn open invites for chat → create invite → send clean share URL + Alias (owner only).
-3. On accept notify → Telegram message includes Alias + link code + date/time/order.
+2. Owner replies with Alias → create invite (previous open invites stay open) → send clean share URL + Alias (owner only).
+3. On `/start` with open invites → list all open links with aliases + «لینک جدید».
+4. On accept notify → Telegram message includes Alias + link code + date/time/order.
+
+## Frontend
+- Date + time are one step (`DateTimePickerCard`), total 4 steps.
 
 ## D1 schema
 See `workers/telegram-proxy/schema.sql`.

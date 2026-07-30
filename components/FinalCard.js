@@ -69,7 +69,7 @@ export default function FinalCard({
   const clock = selectedTime?.labelFa || selectedTime?.label || '';
   const done = submitted || localDone;
 
-  const message = `خوشحالم نگفتی نه! پس ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock}، دنبالت میام برای ${selectedOrder?.label ?? ''} 🚗`;
+  const message = `خوشحالم نگفتی نه! پس ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock} برای ${selectedOrder?.label ?? ''} مهمون منی، بریم بیرون به انتخاب من 💕`;
 
   const handleSubmit = async () => {
     if (done || submitting) return;

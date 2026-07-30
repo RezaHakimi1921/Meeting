@@ -7,8 +7,7 @@ import ProgressBar from './components/ProgressBar';
 import StepHeader from './components/StepHeader';
 import StartGateCard from './components/StartGateCard';
 import IntroCard from './components/IntroCard';
-import DatePickerCard from './components/DatePickerCard';
-import TimePickerCard from './components/TimePickerCard';
+import DateTimePickerCard from './components/DateTimePickerCard';
 import OrderPickerCard from './components/OrderPickerCard';
 import FinalCard from './components/FinalCard';
 import { clearInvite, loadInvite, saveInvite } from './storage';
@@ -18,6 +17,8 @@ import {
   notifyInviteAccepted,
 } from './utils/notify';
 import { colors, spacing } from './theme';
+
+const TOTAL_STEPS = 4;
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -54,15 +55,14 @@ export default function App() {
         setSelectedTime(saved.selectedTime ?? null);
         setSelectedOrder(saved.selectedOrder ?? null);
         setSubmitted(Boolean(saved.notified));
-        setStep(5);
+        setStep(4);
       } else if (saved) {
         setSelectedDate(saved.selectedDate ?? null);
         setSelectedTime(saved.selectedTime ?? null);
         setSelectedOrder(saved.selectedOrder ?? null);
         setSubmitted(Boolean(saved.notified));
-        if (saved.selectedOrder) setStep(5);
-        else if (saved.selectedTime) setStep(4);
-        else if (saved.selectedDate) setStep(3);
+        if (saved.selectedOrder) setStep(4);
+        else if (saved.selectedDate && saved.selectedTime) setStep(3);
         else setStep(1);
       }
       setReady(true);
@@ -103,16 +103,11 @@ export default function App() {
 
   const handleYes = () => animateTo(2);
 
-  const handleDateNext = async (date) => {
+  const handleDateTimeNext = async ({ date, time }) => {
     setSelectedDate(date);
-    await persist({ selectedDate: date });
-    animateTo(3);
-  };
-
-  const handleTimeNext = async (time) => {
     setSelectedTime(time);
-    await persist({ selectedTime: time });
-    animateTo(4);
+    await persist({ selectedDate: date, selectedTime: time });
+    animateTo(3);
   };
 
   const handleOrderConfirm = async (order) => {
@@ -125,7 +120,7 @@ export default function App() {
       completedAt: new Date().toISOString(),
       notified: false,
     });
-    animateTo(5);
+    animateTo(4);
   };
 
   const handleSubmit = async () => {
@@ -189,16 +184,19 @@ export default function App() {
     <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
       <BackgroundHearts />
       <View style={styles.frame}>
-        <StepHeader step={step} total={5} onBack={handleBack} />
-        <ProgressBar step={step} total={5} />
+        <StepHeader step={step} total={TOTAL_STEPS} onBack={handleBack} />
+        <ProgressBar step={step} total={TOTAL_STEPS} />
         <Animated.View style={{ opacity: fade, transform: [{ translateY: slide }] }}>
           {step === 1 ? <IntroCard onYes={handleYes} /> : null}
-          {step === 2 ? <DatePickerCard onNext={handleDateNext} /> : null}
-          {step === 3 ? (
-            <TimePickerCard onNext={handleTimeNext} initialTime={selectedTime} />
+          {step === 2 ? (
+            <DateTimePickerCard
+              onNext={handleDateTimeNext}
+              initialDate={selectedDate}
+              initialTime={selectedTime}
+            />
           ) : null}
-          {step === 4 ? <OrderPickerCard onConfirm={handleOrderConfirm} /> : null}
-          {step === 5 ? (
+          {step === 3 ? <OrderPickerCard onConfirm={handleOrderConfirm} /> : null}
+          {step === 4 ? (
             <FinalCard
               selectedDate={selectedDate}
               selectedTime={selectedTime}
