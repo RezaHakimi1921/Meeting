@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
 const FONT_HREF =
-  'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Vazirmatn:wght@400;600;700&display=swap';
+  'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap';
 
 /**
  * Inject Google Fonts on web so letter typography actually loads.

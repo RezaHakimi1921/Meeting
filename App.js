@@ -231,6 +231,6 @@ const styles = StyleSheet.create({
   },
   frame: {
     width: '100%',
-    maxWidth: 440,
+    maxWidth: 400,
   },
 });

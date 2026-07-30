@@ -1,5 +1,4 @@
 export const colors = {
-  // Letter / ink atmosphere (not purple-AI, not cream+terracotta)
   bgStart: '#2A1520',
   bgEnd: '#4A2433',
   paper: '#FFF7F9',
@@ -11,7 +10,6 @@ export const colors = {
   gold: '#C9A227',
   ribbon: '#D4537E',
   muted: '#8F6B78',
-  // aliases used by older components
   bgStartLegacy: '#2A1520',
   primary: '#B83B5E',
   primarySoft: '#D4537E',
@@ -25,6 +23,14 @@ export const fonts = {
   body: '"Vazirmatn", "Tahoma", sans-serif',
 };
 
-export const radii = { card: 18, pill: 999, seal: 999 };
+/** Prefer medium weights for body copy (shik-tar). */
+export const weights = {
+  regular: '400',
+  medium: '500',
+  semibold: '600',
+  bold: '700',
+};
 
-export const spacing = { xs: 8, sm: 12, md: 16, lg: 24, xl: 32 };
+export const radii = { card: 16, pill: 999, seal: 999 };
+
+export const spacing = { xs: 8, sm: 12, md: 16, lg: 20, xl: 28 };

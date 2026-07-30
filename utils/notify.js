@@ -1,6 +1,25 @@
-const BRIDGE =
-  (typeof window !== 'undefined' && window.__MEETING_BRIDGE__) ||
-  'https://nameless-feather-4353.rezahakimi1921.workers.dev';
+const FALLBACK_BRIDGE = 'https://nameless-feather-4353.rezahakimi1921.workers.dev';
+
+/**
+ * Invite API always lives on the Cloudflare Worker.
+ * The static app may be on the Ubuntu IP (/meeting) — that host has no /invite
+ * routes, so same-origin must NOT be used there.
+ */
+function resolveBridge() {
+  if (typeof window === 'undefined') return FALLBACK_BRIDGE;
+  if (window.__MEETING_BRIDGE__) return window.__MEETING_BRIDGE__;
+  try {
+    const { origin, hostname } = window.location;
+    if (hostname && hostname.endsWith('workers.dev')) {
+      return String(origin).replace(/\/$/, '');
+    }
+  } catch {
+    // fall through
+  }
+  return FALLBACK_BRIDGE;
+}
+
+const BRIDGE = resolveBridge();
 
 function getInviteIdFromLocation() {
   if (typeof window === 'undefined') return null;

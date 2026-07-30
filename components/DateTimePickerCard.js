@@ -1,20 +1,31 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, fonts, radii, spacing } from '../theme';
+import { colors, fonts, radii, spacing, weights } from '../theme';
 import {
   MONTHS_FA,
   WEEKDAYS_FA,
   formatDateLabel,
   getMonthGrid,
-  isBeforeToday,
+  isDateSelectable,
+  monthHasSelectableDays,
+  shiftJalaliMonth,
   toFaDigits,
   todayJalali,
 } from '../utils/jalali';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
+import { playPaperFlip, unlockAudio } from '../utils/sound';
 import LetterSheet from './LetterSheet';
+import { TimeWheel } from './WheelPicker';
 
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 10);
 const MINUTES = [0, 15, 30, 45];
+const MAX_DAYS_AHEAD = 14;
+const WINDOW_HINTS = [
+  'بیا زیاد منتظر نمونه ✨',
+  'دو هفتهٔ بعد بهترین زمانه ❤️',
+  'یه روز از ۱۴ روز آینده رو انتخاب کن ☕',
+  'هرچی زودتر، قشنگ‌تره 💕',
+];
 
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -22,36 +33,74 @@ function pad2(n) {
 
 export default function DateTimePickerCard({ onNext, initialDate, initialTime }) {
   const today = useMemo(() => todayJalali(), []);
+  const hint = useMemo(
+    () => WINDOW_HINTS[Math.floor(Math.random() * WINDOW_HINTS.length)],
+    []
+  );
   const [jy, setJy] = useState(initialDate?.jy ?? today.jy);
   const [jm, setJm] = useState(initialDate?.jm ?? today.jm);
-  const [selected, setSelected] = useState(initialDate ?? null);
+  const [selected, setSelected] = useState(() => {
+    if (
+      initialDate &&
+      isDateSelectable(initialDate.jy, initialDate.jm, initialDate.jd, MAX_DAYS_AHEAD)
+    ) {
+      return initialDate;
+    }
+    return null;
+  });
   const [hour, setHour] = useState(initialTime?.hour ?? 19);
   const [minute, setMinute] = useState(initialTime?.minute ?? 0);
+  const hourRef = useRef(hour);
+  const minuteRef = useRef(minute);
   const [affirm, setAffirm] = useState(false);
   const btnScale = useRef(new Animated.Value(1)).current;
+  const fadeIn = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    hourRef.current = hour;
+  }, [hour]);
+  useEffect(() => {
+    minuteRef.current = minute;
+  }, [minute]);
+
+  const setHourSafe = (h) => {
+    hourRef.current = h;
+    setHour(h);
+  };
+  const setMinuteSafe = (m) => {
+    minuteRef.current = m;
+    setMinute(m);
+  };
+
+  useEffect(() => {
+    Animated.timing(fadeIn, { toValue: 1, duration: 480, useNativeDriver: true }).start();
+  }, [fadeIn]);
 
   const grid = useMemo(() => getMonthGrid(jy, jm), [jy, jm]);
   const timeLabel = `${pad2(hour)}:${pad2(minute)}`;
   const timeLabelFa = toFaDigits(timeLabel);
 
+  const canGoPrev = useMemo(() => {
+    const prev = shiftJalaliMonth(jy, jm, -1);
+    return monthHasSelectableDays(prev.jy, prev.jm, MAX_DAYS_AHEAD);
+  }, [jy, jm]);
+
+  const canGoNext = useMemo(() => {
+    const next = shiftJalaliMonth(jy, jm, 1);
+    return monthHasSelectableDays(next.jy, next.jm, MAX_DAYS_AHEAD);
+  }, [jy, jm]);
+
   const shiftMonth = (delta) => {
-    let nextJm = jm + delta;
-    let nextJy = jy;
-    if (nextJm < 1) {
-      nextJm = 12;
-      nextJy -= 1;
-    } else if (nextJm > 12) {
-      nextJm = 1;
-      nextJy += 1;
-    }
-    if (nextJy < today.jy || (nextJy === today.jy && nextJm < today.jm)) return;
-    setJy(nextJy);
-    setJm(nextJm);
+    if (delta < 0 && !canGoPrev) return;
+    if (delta > 0 && !canGoNext) return;
+    const next = shiftJalaliMonth(jy, jm, delta);
+    setJy(next.jy);
+    setJm(next.jm);
   };
 
   const pickDay = (cell) => {
     if (!cell.inMonth || cell.jd == null) return;
-    if (isBeforeToday(cell.jy, cell.jm, cell.jd)) return;
+    if (!isDateSelectable(cell.jy, cell.jm, cell.jd, MAX_DAYS_AHEAD)) return;
     const meta = formatDateLabel(cell.jy, cell.jm, cell.jd);
     setSelected({
       jy: cell.jy,
@@ -66,33 +115,48 @@ export default function DateTimePickerCard({ onNext, initialDate, initialTime })
     if (!selected || affirm) return;
     bounce(btnScale);
     tryVibrate();
+    unlockAudio();
+    playPaperFlip();
     setAffirm(true);
-    const time = { hour, minute, label: timeLabel, labelFa: timeLabelFa };
+    const h = hourRef.current;
+    const m = minuteRef.current;
+    const label = `${pad2(h)}:${pad2(m)}`;
+    const time = { hour: h, minute: m, label, labelFa: toFaDigits(label) };
     setTimeout(() => onNext?.({ date: selected, time }), 700);
   };
 
   return (
-    <LetterSheet stamp={'صفحه\nدوم'} style={styles.sheet}>
-      <View style={styles.inner}>
+    <LetterSheet stamp={'صفحه\nدوم'} style={styles.sheet} dropIn={false}>
+      <Animated.View style={[styles.inner, { opacity: fadeIn }]}>
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
         >
           <Text style={styles.eyebrow}>روی کاغذ نامه بنویس</Text>
           <Text style={styles.title}>کی و ساعت چند بریم بیرون؟</Text>
           <Text style={styles.subtitle}>روز و ساعت رو با جوهر انتخاب کن</Text>
+          <Text style={styles.windowHint}>{hint}</Text>
 
           <View style={styles.monthRow}>
-            <Pressable onPress={() => shiftMonth(1)} style={styles.navBtn}>
-              <Text style={styles.navText}>›</Text>
+            <Pressable
+              onPress={() => shiftMonth(1)}
+              disabled={!canGoNext}
+              style={[styles.navBtn, !canGoNext && styles.navDisabled]}
+            >
+              <Text style={[styles.navText, !canGoNext && styles.navTextDisabled]}>›</Text>
             </Pressable>
             <Text style={styles.monthLabel}>
               {MONTHS_FA[jm - 1]} {toFaDigits(jy)}
             </Text>
-            <Pressable onPress={() => shiftMonth(-1)} style={styles.navBtn}>
-              <Text style={styles.navText}>‹</Text>
+            <Pressable
+              onPress={() => shiftMonth(-1)}
+              disabled={!canGoPrev}
+              style={[styles.navBtn, !canGoPrev && styles.navDisabled]}
+            >
+              <Text style={[styles.navText, !canGoPrev && styles.navTextDisabled]}>‹</Text>
             </Pressable>
           </View>
 
@@ -106,8 +170,11 @@ export default function DateTimePickerCard({ onNext, initialDate, initialTime })
 
           <View style={styles.grid}>
             {grid.map((cell, idx) => {
-              const disabled =
-                !cell.inMonth || cell.jd == null || isBeforeToday(cell.jy, cell.jm, cell.jd);
+              const selectable =
+                cell.inMonth &&
+                cell.jd != null &&
+                isDateSelectable(cell.jy, cell.jm, cell.jd, MAX_DAYS_AHEAD);
+              const disabled = !selectable;
               const isSelected =
                 selected &&
                 selected.jy === cell.jy &&
@@ -135,32 +202,14 @@ export default function DateTimePickerCard({ onNext, initialDate, initialTime })
           </View>
 
           <Text style={styles.section}>ساعت · {timeLabelFa}</Text>
-          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-            {HOURS.map((h) => {
-              const active = hour === h;
-              return (
-                <Pressable key={h} onPress={() => setHour(h)} style={[styles.chip, active && styles.chipActive]}>
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{toFaDigits(pad2(h))}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-
-          <Text style={styles.section}>دقیقه</Text>
-          <View style={styles.minuteRow}>
-            {MINUTES.map((m) => {
-              const active = minute === m;
-              return (
-                <Pressable
-                  key={m}
-                  onPress={() => setMinute(m)}
-                  style={[styles.chip, styles.minuteChip, active && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{toFaDigits(pad2(m))}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <TimeWheel
+            hour={hour}
+            minute={minute}
+            onHour={setHourSafe}
+            onMinute={setMinuteSafe}
+            hours={HOURS}
+            minutes={MINUTES}
+          />
 
           {affirm ? <Text style={styles.affirm}>با جوهر قرمز تو نامه ثبت شد…</Text> : null}
         </ScrollView>
@@ -176,16 +225,16 @@ export default function DateTimePickerCard({ onNext, initialDate, initialTime })
             </Pressable>
           </Animated.View>
         </View>
-      </View>
+      </Animated.View>
     </LetterSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: { maxHeight: '78vh' },
-  inner: { maxHeight: '70vh' },
+  sheet: { maxHeight: '76vh' },
+  inner: { maxHeight: '68vh' },
   scroll: { flexGrow: 1, flexShrink: 1 },
-  scrollContent: { paddingBottom: spacing.sm },
+  scrollContent: { paddingBottom: spacing.xs },
   footer: {
     paddingTop: spacing.sm,
     borderTopWidth: 1,
@@ -195,6 +244,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.body,
     color: colors.wax,
     fontSize: 12,
+    fontWeight: weights.medium,
     textAlign: 'right',
     writingDirection: 'rtl',
     marginBottom: 4,
@@ -202,98 +252,118 @@ const styles = StyleSheet.create({
   title: {
     fontFamily: fonts.body,
     color: colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: weights.semibold,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   subtitle: {
     fontFamily: fonts.body,
     color: colors.inkSoft,
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: weights.medium,
     marginTop: 4,
-    marginBottom: spacing.sm,
+    marginBottom: 6,
     textAlign: 'right',
     writingDirection: 'rtl',
+  },
+  windowHint: {
+    fontFamily: fonts.body,
+    color: colors.wax,
+    fontSize: 13,
+    fontWeight: weights.medium,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginBottom: spacing.sm,
+    backgroundColor: 'rgba(184,59,94,0.08)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   monthRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
-  monthLabel: { fontFamily: fonts.body, color: colors.ink, fontSize: 14, fontWeight: '700' },
+  monthLabel: {
+    fontFamily: fonts.body,
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: weights.semibold,
+  },
   navBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#F8E6EE',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  navText: { fontSize: 18, color: colors.wax, lineHeight: 20 },
+  navDisabled: {
+    opacity: 0.28,
+  },
+  navText: { fontSize: 16, color: colors.wax, lineHeight: 18 },
+  navTextDisabled: { color: colors.muted },
   weekRow: { flexDirection: 'row-reverse', marginBottom: 2 },
   weekHead: {
     width: `${100 / 7}%`,
     textAlign: 'center',
     color: colors.muted,
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: fonts.body,
+    fontWeight: weights.medium,
   },
   grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', marginBottom: spacing.sm },
   day: {
     width: `${100 / 7}%`,
-    height: 32,
+    height: 27,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
+    borderRadius: 7,
   },
   daySelected: { backgroundColor: colors.wax },
-  dayDisabled: { opacity: 0.35 },
-  dayText: { color: colors.ink, fontSize: 12, fontWeight: '600', fontFamily: fonts.body },
+  dayDisabled: { opacity: 0.28 },
+  dayText: {
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: weights.medium,
+    fontFamily: fonts.body,
+  },
   dayTextSelected: { color: '#fff' },
   dayTextDisabled: { color: colors.muted },
   section: {
     color: colors.muted,
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'right',
     writingDirection: 'rtl',
-    marginBottom: 4,
-    marginTop: spacing.xs,
+    marginBottom: 6,
     fontFamily: fonts.body,
+    fontWeight: weights.medium,
   },
-  row: { flexDirection: 'row-reverse', gap: 6, paddingVertical: 4 },
-  minuteRow: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 6, marginBottom: spacing.xs },
-  chip: {
-    minWidth: 44,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: radii.pill,
-    backgroundColor: '#FFF9FC',
-    borderWidth: 1.5,
-    borderColor: colors.paperEdge,
-    alignItems: 'center',
-  },
-  minuteChip: { flexGrow: 1 },
-  chipActive: { backgroundColor: '#FFE8F1', borderColor: colors.wax },
-  chipText: { color: colors.ink, fontWeight: '600', fontSize: 13, fontFamily: fonts.body },
-  chipTextActive: { color: colors.wax },
   affirm: {
     color: colors.wax,
     textAlign: 'center',
     writingDirection: 'rtl',
     marginTop: spacing.xs,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: fonts.body,
+    fontWeight: weights.medium,
   },
   nextBtn: {
     backgroundColor: colors.wax,
     borderRadius: radii.pill,
-    paddingVertical: 13,
+    paddingVertical: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: colors.gold,
   },
   nextDisabled: { opacity: 0.45 },
-  nextText: { color: '#fff', fontSize: 15, fontWeight: '700', fontFamily: fonts.body },
+  nextText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: weights.semibold,
+    fontFamily: fonts.body,
+  },
 });

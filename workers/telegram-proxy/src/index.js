@@ -2,31 +2,24 @@
  * Telegram bridge for Date Invite (Cloudflare Worker + D1)
  *
  * =============================================================================
- * ONE-TIME SETUP (required to hide your name + keep links opening in Iran)
+ * HOW INVITE LINKS OPEN (fast + always fresh)
  * =============================================================================
- * 1) Cloudflare Dashboard → right sidebar "Workers & Pages"
- *    → Manage account / Account settings → "Workers subdomain"
- *    → Change from rezahakimi1921 to something neutral, e.g. meetstory
- *    New URL looks like:
- *      https://nameless-feather-4353.meetstory.workers.dev
+ * Telegram shows:  WORKER/r/CODE
+ * Browser opens:   ORIGIN_HINT/meeting/?i=CODE   (your Ubuntu host — always up to date)
  *
- * 2) Worker → Settings → Variables:
- *      WORKER_PUBLIC_URL = https://nameless-feather-4353.meetstory.workers.dev
- *      ORIGIN_HOST       = http://meetstory.duckdns.org
- *      ORIGIN_HINT       = http://94.182.92.79
- *      BOT_USERNAME      = Meetingir_mir_bot
- *    Secret: TELEGRAM_BOT_TOKEN
- *    D1 binding name: DB
+ * We intentionally do NOT proxy Cloudflare Pages for the app. Pages often stayed
+ * on an old upload while /var/www/meeting was already updated, so guests saw
+ * zero UI changes. One redirect hop is ~0.3s and always matches the server build.
  *
- * 3) Paste this file → Deploy
- * 4) Open in browser:  .../refresh-share-links
- * 5) Bot → نامه جدید
+ * Vars (optional):
+ *   ORIGIN_HINT = http://94.182.92.79
+ *   WORKER_PUBLIC_URL = https://…workers.dev   (after renaming subdomain)
+ * Secret: TELEGRAM_BOT_TOKEN
+ * D1 binding: DB
  *
- * RULES (hard):
- *  - Never put raw server IP in Telegram text
- *  - Never use tinyurl / is.gd / v.gd (blocked in Iran → "link won't open")
- *  - Guest opens: WORKER /r/CODE → same-host /meeting?i=CODE (proxied, no IP in bar)
- *  - If DuckDNS upstream is down, browser falls back to ORIGIN_HINT (IP) only as last resort
+ * RULES:
+ *  - Never put raw IP in the Telegram message text (share link is Worker /r/)
+ *  - Never use tinyurl / is.gd (blocked in Iran)
  */
 export default {
   async fetch(request, env, ctx) {
@@ -41,36 +34,46 @@ export default {
         return cors(new Response(null, { status: 204 }));
       }
 
-      if (request.method === 'GET' && (url.pathname === '/health' || url.pathname === '/')) {
+      if (request.method === 'GET' && url.pathname === '/health') {
         const pub = workerPublic(env, url.origin);
+        const share = buildShareLink(env, 'SAMPLE', url.origin);
         return cors(
           json({
             ok: true,
             service: 'meeting-telegram-bridge',
             hasToken: Boolean(token(env)),
             hasDb: Boolean(env.DB),
+            openBase: `${originHint(env)}/meeting`,
             workerPublic: pub,
-            originHost: originHost(env),
-            originHint: originHint(env),
-            shareMode: 'worker-proxy-no-shortener',
-            nameLeak: leaksIdentity(pub),
-            tip: leaksIdentity(pub)
-              ? 'Rename Workers subdomain + set WORKER_PUBLIC_URL (see file header).'
+            sampleShareLink: share,
+            codeVersion: '2026-07-30-origin-redirect',
+            nameLeak: leaksIdentity(share),
+            tip: leaksIdentity(share)
+              ? 'Rename workers.dev subdomain, then set WORKER_PUBLIC_URL.'
               : 'ok',
           })
         );
       }
 
-      // /r/CODE → same Worker /meeting?i=CODE (guest never sees IP if proxy works)
+      // /r/CODE → one hop to the live Ubuntu build (never stale Pages)
       const redirectMatch = url.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)$/);
       if (request.method === 'GET' && redirectMatch) {
         const code = redirectMatch[1];
-        const dest = `${url.origin}/meeting?i=${encodeURIComponent(code)}`;
-        return Response.redirect(dest, 302);
+        return Response.redirect(originMeetingUrl(env, code), 302);
       }
 
-      if (request.method === 'GET' && (url.pathname === '/meeting' || url.pathname.startsWith('/meeting/'))) {
-        return proxyMeeting(request, env, url);
+      // Older /meeting paths & Worker root → same origin host
+      if (
+        request.method === 'GET' &&
+        (url.pathname === '/' ||
+          url.pathname === '/meeting' ||
+          url.pathname.startsWith('/meeting/'))
+      ) {
+        const code = url.searchParams.get('i') || '';
+        return Response.redirect(
+          code ? originMeetingUrl(env, code) : `${originHint(env)}/meeting/`,
+          302
+        );
       }
 
       if (request.method === 'POST' && url.pathname === '/telegram-webhook') {
@@ -153,41 +156,6 @@ async function proxyTelegram(request, url) {
   });
 }
 
-/**
- * Proxy static meeting app.
- * Prefer hostname ORIGIN_HOST (DuckDNS) — CF cannot fetch() raw IPs (error 1003).
- * Last resort: 302 browser to ORIGIN_HINT IP so the page still opens.
- */
-async function proxyMeeting(request, env, url) {
-  const hostBase = originHost(env);
-  const dest = `${hostBase}${url.pathname}${url.search}`;
-
-  try {
-    const res = await fetch(dest, {
-      method: 'GET',
-      headers: {
-        'User-Agent': request.headers.get('User-Agent') || 'meeting-bridge',
-        Accept: request.headers.get('Accept') || '*/*',
-      },
-      redirect: 'follow',
-    });
-    if (res.ok || (res.status >= 300 && res.status < 400)) {
-      const headers = new Headers(res.headers);
-      headers.delete('content-encoding');
-      headers.delete('transfer-encoding');
-      headers.delete('content-security-policy');
-      headers.set('Cache-Control', res.headers.get('Cache-Control') || 'public, max-age=60');
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
-    }
-  } catch {
-    // fall through to IP redirect
-  }
-
-  // Last resort only — guest address bar may show IP, but Telegram message never does
-  const fallback = `${originHint(env)}${url.pathname}${url.search}`;
-  return Response.redirect(fallback, 302);
-}
-
 function cors(res) {
   const headers = new Headers(res.headers);
   headers.set('Access-Control-Allow-Origin', '*');
@@ -211,9 +179,9 @@ function originHint(env) {
   return (env.ORIGIN_HINT || 'http://94.182.92.79').replace(/\/$/, '');
 }
 
-/** Hostname CF is allowed to fetch (never a raw IP). */
-function originHost(env) {
-  return (env.ORIGIN_HOST || 'http://meetstory.duckdns.org').replace(/\/$/, '');
+/** Live invite page on the Ubuntu host (always the latest expo export). */
+function originMeetingUrl(env, code) {
+  return `${originHint(env)}/meeting/?i=${encodeURIComponent(code)}`;
 }
 
 /**
@@ -226,6 +194,7 @@ function workerPublic(env, requestOrigin) {
   if (requestOrigin) return String(requestOrigin).replace(/\/$/, '');
   return 'https://nameless-feather-4353.rezahakimi1921.workers.dev';
 }
+
 
 function leaksIdentity(url) {
   const u = String(url || '').toLowerCase();
@@ -331,7 +300,7 @@ async function refreshShareLinks(env) {
   return json({ ok: true, cleared: result?.meta?.changes ?? true });
 }
 
-/** Always Worker /r/CODE — never IP, never tinyurl. */
+/** Link put in Telegram — one host, no IP, no third-party shortener. */
 function buildShareLink(env, code, requestOrigin) {
   return `${workerPublic(env, requestOrigin)}/r/${encodeURIComponent(code)}`;
 }
@@ -472,6 +441,7 @@ async function sendLinkMessage(env, chatId, code, requestOrigin) {
   const link = await resolveShareLink(env, code, requestOrigin);
   const alias = (row?.alias || '').trim() || '—';
 
+  // Customer-facing only — never mention Cloudflare / subdomain / env vars here.
   const text = [
     'سلام 💞 نامه‌ت آماده‌ست.',
     '',
@@ -483,7 +453,7 @@ async function sendLinkMessage(env, chatId, code, requestOrigin) {
     link,
   ].join('\n');
 
-  await tg(env, 'sendMessage', {
+  const result = await tg(env, 'sendMessage', {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
@@ -491,6 +461,9 @@ async function sendLinkMessage(env, chatId, code, requestOrigin) {
       inline_keyboard: [[{ text: '✨ نامه جدید', callback_data: 'link:new' }]],
     },
   });
+  if (!result?.ok) {
+    throw new Error(result?.description || 'telegram_send_failed');
+  }
 }
 
 async function showActiveOrAsk(env, chatId, requestOrigin) {

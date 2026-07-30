@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
   backText: {
     color: '#F7C6D6',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '500',
     writingDirection: 'rtl',
     fontFamily: fonts.body,
   },
@@ -50,6 +50,7 @@ const styles = StyleSheet.create({
   hint: {
     color: 'rgba(247,198,214,0.75)',
     fontSize: 12,
+    fontWeight: '500',
     writingDirection: 'rtl',
     fontFamily: fonts.body,
   },
