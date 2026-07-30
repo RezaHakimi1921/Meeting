@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radii, spacing } from '../theme';
+import { colors, fonts, radii, spacing } from '../theme';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
+import LetterSheet from './LetterSheet';
 
 const OPTIONS = [
   { id: 'pizza', emoji: '🍕', label: 'پیتزا' },
@@ -13,6 +14,13 @@ const OPTIONS = [
 export default function OrderPickerCard({ onConfirm }) {
   const [selected, setSelected] = useState(null);
   const btnScale = useRef(new Animated.Value(1)).current;
+  const ink = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!selected) return;
+    ink.setValue(0);
+    Animated.timing(ink, { toValue: 1, duration: 380, useNativeDriver: true }).start();
+  }, [selected, ink]);
 
   const handleConfirm = () => {
     if (!selected) return;
@@ -22,9 +30,10 @@ export default function OrderPickerCard({ onConfirm }) {
   };
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.title}>چی سفارش میدی؟</Text>
-      <Text style={styles.subtitle}>یه چیز خوشمزه انتخاب کن که مهمونت باشی</Text>
+    <LetterSheet stamp={'منو\nنامه'}>
+      <Text style={styles.eyebrow}>یک خط از نامه…</Text>
+      <Text style={styles.title}>چی سفارش می‌دی؟</Text>
+      <Text style={styles.subtitle}>یه چیز خوشمزه بنویس تو نامه، مهمون منی</Text>
 
       <View style={styles.grid}>
         {OPTIONS.map((opt) => {
@@ -36,11 +45,17 @@ export default function OrderPickerCard({ onConfirm }) {
               style={[styles.option, active && styles.optionActive]}
             >
               <Text style={styles.optionEmoji}>{opt.emoji}</Text>
-              <Text style={styles.optionLabel}>{opt.label}</Text>
+              <Text style={[styles.optionLabel, active && styles.optionLabelActive]}>{opt.label}</Text>
             </Pressable>
           );
         })}
       </View>
+
+      {selected ? (
+        <Animated.Text style={[styles.inkLine, { opacity: ink }]}>
+          با خط خودم نوشتم: «{selected.label}»
+        </Animated.Text>
+      ) : null}
 
       <Animated.View style={{ transform: [{ scale: btnScale }] }}>
         <Pressable
@@ -48,81 +63,86 @@ export default function OrderPickerCard({ onConfirm }) {
           onPress={handleConfirm}
           style={[styles.cta, !selected && styles.ctaDisabled]}
         >
-          <Text style={styles.ctaText}>بریم که بریم 💌</Text>
+          <Text style={styles.ctaText}>مُهر بزن و بفرست 💌</Text>
         </Pressable>
       </Animated.View>
-    </View>
+    </LetterSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radii.card,
-    padding: spacing.lg,
-    width: '100%',
-    maxWidth: 420,
-    shadowColor: '#E91E63',
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+  eyebrow: {
+    fontFamily: fonts.body,
+    color: colors.wax,
+    fontSize: 12,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginBottom: 4,
   },
   title: {
-    color: colors.text,
+    fontFamily: fonts.display,
+    color: colors.ink,
     fontSize: 24,
     fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
+    lineHeight: 36,
   },
   subtitle: {
-    color: colors.muted,
+    fontFamily: fonts.body,
+    color: colors.inkSoft,
     fontSize: 14,
     marginTop: spacing.xs,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   grid: {
     flexDirection: 'row-reverse',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
     gap: spacing.sm,
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   option: {
-    width: '48%',
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: '#F3E0EA',
-    backgroundColor: '#FFF9FC',
+    width: '47%',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: colors.paperEdge,
+    backgroundColor: '#FFFCFD',
     paddingVertical: spacing.md,
     alignItems: 'center',
   },
   optionActive: {
-    borderColor: colors.primary,
-    backgroundColor: '#FFE8F1',
+    borderColor: colors.wax,
+    backgroundColor: '#FFE9F1',
   },
-  optionEmoji: {
-    fontSize: 32,
-    marginBottom: spacing.xs,
-  },
+  optionEmoji: { fontSize: 28, marginBottom: 6 },
   optionLabel: {
-    color: colors.text,
-    fontSize: 15,
+    fontFamily: fonts.body,
+    color: colors.ink,
     fontWeight: '600',
+    fontSize: 15,
+  },
+  optionLabelActive: { color: colors.waxDeep },
+  inkLine: {
+    fontFamily: fonts.body,
+    color: colors.wax,
+    textAlign: 'right',
     writingDirection: 'rtl',
+    marginBottom: spacing.md,
+    fontSize: 14,
   },
   cta: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.wax,
     borderRadius: radii.pill,
     paddingVertical: 14,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.gold,
   },
-  ctaDisabled: {
-    opacity: 0.45,
-  },
+  ctaDisabled: { opacity: 0.45 },
   ctaText: {
+    fontFamily: fonts.body,
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',

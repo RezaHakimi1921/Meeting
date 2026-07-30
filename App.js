@@ -10,6 +10,7 @@ import IntroCard from './components/IntroCard';
 import DateTimePickerCard from './components/DateTimePickerCard';
 import OrderPickerCard from './components/OrderPickerCard';
 import FinalCard from './components/FinalCard';
+import WebFonts from './components/WebFonts';
 import { clearInvite, loadInvite, saveInvite } from './storage';
 import {
   fetchInvite,
@@ -157,12 +158,18 @@ export default function App() {
   };
 
   if (!ready) {
-    return <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root} />;
+    return (
+      <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
+        <WebFonts />
+        <StatusBar style="light" />
+      </LinearGradient>
+    );
   }
 
   if (inviteError) {
     return (
       <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
+        <WebFonts />
         <BackgroundHearts />
         <View style={styles.frame}>
           <StartGateCard
@@ -175,13 +182,14 @@ export default function App() {
             }
           />
         </View>
-        <StatusBar style="dark" />
+        <StatusBar style="light" />
       </LinearGradient>
     );
   }
 
   return (
     <LinearGradient colors={[colors.bgStart, colors.bgEnd]} style={styles.root}>
+      <WebFonts />
       <BackgroundHearts />
       <View style={styles.frame}>
         <StepHeader step={step} total={TOTAL_STEPS} onBack={handleBack} />
@@ -209,7 +217,7 @@ export default function App() {
           ) : null}
         </Animated.View>
       </View>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
     </LinearGradient>
   );
 }

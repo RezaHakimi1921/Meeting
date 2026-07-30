@@ -3,7 +3,6 @@ main = "src/index.js"
 compatibility_date = "2024-11-01"
 workers_dev = true
 
-# Create D1 in dashboard, then paste database_id here (optional for local wrangler)
 [[d1_databases]]
 binding = "DB"
 database_name = "meeting-invites"
@@ -12,8 +11,10 @@ database_id = "REPLACE_WITH_D1_DATABASE_ID"
 [triggers]
 crons = ["* * * * *"]
 
+# After renaming Workers subdomain to meetstory, set WORKER_PUBLIC_URL to the new URL.
 [vars]
-PUBLIC_BASE_URL = "https://bold-frog-8303.zerodeploy.app"
+WORKER_PUBLIC_URL = "https://nameless-feather-4353.rezahakimi1921.workers.dev"
+ORIGIN_HOST = "http://meetstory.duckdns.org"
 ORIGIN_HINT = "http://94.182.92.79"
 BOT_USERNAME = "Meetingir_mir_bot"
 

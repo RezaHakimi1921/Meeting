@@ -1,21 +1,21 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, spacing } from '../theme';
+import { colors, fonts, spacing } from '../theme';
 
-export default function StepHeader({ step, total = 5, onBack }) {
-  const showBack = typeof onBack === 'function' && step > 1 && step < 5;
+export default function StepHeader({ step, total = 4, onBack }) {
+  const showBack = typeof onBack === 'function' && step > 1 && step < total;
 
   return (
     <View style={styles.wrap}>
       <View style={styles.topRow}>
         {showBack ? (
           <Pressable onPress={onBack} hitSlop={10} style={styles.backBtn}>
-            <Text style={styles.backText}>‹ قبلی</Text>
+            <Text style={styles.backText}>‹ ورق قبل</Text>
           </Pressable>
         ) : (
           <View style={styles.backPlaceholder} />
         )}
         <Text style={styles.hint}>
-          مرحله {step} از {total}
+          صفحه {step} از {total} نامه
         </Text>
       </View>
     </View>
@@ -38,17 +38,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   backText: {
-    color: colors.primary,
-    fontSize: 15,
+    color: '#F7C6D6',
+    fontSize: 14,
     fontWeight: '700',
     writingDirection: 'rtl',
+    fontFamily: fonts.body,
   },
   backPlaceholder: {
-    width: 64,
+    width: 72,
   },
   hint: {
-    color: colors.muted,
+    color: 'rgba(247,198,214,0.75)',
     fontSize: 12,
     writingDirection: 'rtl',
+    fontFamily: fonts.body,
   },
 });

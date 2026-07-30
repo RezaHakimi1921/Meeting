@@ -1,15 +1,32 @@
 /**
  * Telegram bridge for Date Invite (Cloudflare Worker + D1)
  *
- * Dashboard bindings / vars:
- *   Secret: TELEGRAM_BOT_TOKEN
- *   Vars:   PUBLIC_BASE_URL = https://bold-frog-8303.zerodeploy.app
- *           ORIGIN_HINT = http://94.182.92.79
- *           BOT_USERNAME = Meetingir_mir_bot
- *   D1:     binding name must be exactly DB
+ * =============================================================================
+ * ONE-TIME SETUP (required to hide your name + keep links opening in Iran)
+ * =============================================================================
+ * 1) Cloudflare Dashboard → right sidebar "Workers & Pages"
+ *    → Manage account / Account settings → "Workers subdomain"
+ *    → Change from rezahakimi1921 to something neutral, e.g. meetstory
+ *    New URL looks like:
+ *      https://nameless-feather-4353.meetstory.workers.dev
  *
- * Clear PUBLIC_BASE_URL if it still points at a raw IP.
- * Run schema.sql once in D1 Console (or POST /init-db).
+ * 2) Worker → Settings → Variables:
+ *      WORKER_PUBLIC_URL = https://nameless-feather-4353.meetstory.workers.dev
+ *      ORIGIN_HOST       = http://meetstory.duckdns.org
+ *      ORIGIN_HINT       = http://94.182.92.79
+ *      BOT_USERNAME      = Meetingir_mir_bot
+ *    Secret: TELEGRAM_BOT_TOKEN
+ *    D1 binding name: DB
+ *
+ * 3) Paste this file → Deploy
+ * 4) Open in browser:  .../refresh-share-links
+ * 5) Bot → نامه جدید
+ *
+ * RULES (hard):
+ *  - Never put raw server IP in Telegram text
+ *  - Never use tinyurl / is.gd / v.gd (blocked in Iran → "link won't open")
+ *  - Guest opens: WORKER /r/CODE → same-host /meeting?i=CODE (proxied, no IP in bar)
+ *  - If DuckDNS upstream is down, browser falls back to ORIGIN_HINT (IP) only as last resort
  */
 export default {
   async fetch(request, env, ctx) {
@@ -25,23 +42,31 @@ export default {
       }
 
       if (request.method === 'GET' && (url.pathname === '/health' || url.pathname === '/')) {
+        const pub = workerPublic(env, url.origin);
         return cors(
           json({
             ok: true,
             service: 'meeting-telegram-bridge',
             hasToken: Boolean(token(env)),
             hasDb: Boolean(env.DB),
-            publicBase: await resolvePublicBase(env),
+            workerPublic: pub,
+            originHost: originHost(env),
+            originHint: originHint(env),
+            shareMode: 'worker-proxy-no-shortener',
+            nameLeak: leaksIdentity(pub),
+            tip: leaksIdentity(pub)
+              ? 'Rename Workers subdomain + set WORKER_PUBLIC_URL (see file header).'
+              : 'ok',
           })
         );
       }
 
-      // /r/CODE → clean public meeting page
+      // /r/CODE → same Worker /meeting?i=CODE (guest never sees IP if proxy works)
       const redirectMatch = url.pathname.match(/^\/r\/([a-zA-Z0-9_-]+)$/);
       if (request.method === 'GET' && redirectMatch) {
         const code = redirectMatch[1];
-        const base = await resolvePublicBase(env);
-        return Response.redirect(`${base}?i=${encodeURIComponent(code)}`, 302);
+        const dest = `${url.origin}/meeting?i=${encodeURIComponent(code)}`;
+        return Response.redirect(dest, 302);
       }
 
       if (request.method === 'GET' && (url.pathname === '/meeting' || url.pathname.startsWith('/meeting/'))) {
@@ -52,7 +77,7 @@ export default {
         const update = await request.json();
         try {
           await ensureDb(env);
-          await handleBotUpdate(env, update);
+          await handleBotUpdate(env, update, url.origin);
         } catch (e) {
           const chatId =
             update?.message?.chat?.id ||
@@ -69,7 +94,6 @@ export default {
             }
           }
         }
-        // Always ACK Telegram so delivery keeps working
         return new Response('ok');
       }
 
@@ -77,9 +101,15 @@ export default {
         return cors(await registerWebhook(env, url.origin));
       }
 
-      // Apply D1 schema (safe to call more than once)
       if (request.method === 'POST' && url.pathname === '/init-db') {
         return cors(await initDb(env));
+      }
+
+      if (
+        (request.method === 'POST' || request.method === 'GET') &&
+        url.pathname === '/refresh-share-links'
+      ) {
+        return cors(await refreshShareLinks(env));
       }
 
       const inviteMatch = url.pathname.match(/^\/invite\/([a-zA-Z0-9_-]+)$/);
@@ -88,7 +118,7 @@ export default {
       }
 
       if (request.method === 'POST' && url.pathname === '/notify') {
-        return cors(await handleNotify(request, env));
+        return cors(await handleNotify(request, env, url.origin));
       }
 
       return cors(new Response('Not found', { status: 404 }));
@@ -124,31 +154,38 @@ async function proxyTelegram(request, url) {
 }
 
 /**
- * Serve meeting static files.
- * Cloudflare Workers CANNOT fetch() a raw IP (returns error 1003).
- * If ORIGIN_HINT is an IP, redirect the browser instead of proxying.
+ * Proxy static meeting app.
+ * Prefer hostname ORIGIN_HOST (DuckDNS) — CF cannot fetch() raw IPs (error 1003).
+ * Last resort: 302 browser to ORIGIN_HINT IP so the page still opens.
  */
 async function proxyMeeting(request, env, url) {
-  const origin = originHint(env);
-  const dest = `${origin}${url.pathname}${url.search}`;
+  const hostBase = originHost(env);
+  const dest = `${hostBase}${url.pathname}${url.search}`;
 
-  // Raw IPv4/IPv6 in URL → redirect browser (fetch would 1003)
-  if (/^https?:\/\/(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\//i.test(origin + '/') ||
-      /^https?:\/\/\[/i.test(origin)) {
-    return Response.redirect(dest, 302);
+  try {
+    const res = await fetch(dest, {
+      method: 'GET',
+      headers: {
+        'User-Agent': request.headers.get('User-Agent') || 'meeting-bridge',
+        Accept: request.headers.get('Accept') || '*/*',
+      },
+      redirect: 'follow',
+    });
+    if (res.ok || (res.status >= 300 && res.status < 400)) {
+      const headers = new Headers(res.headers);
+      headers.delete('content-encoding');
+      headers.delete('transfer-encoding');
+      headers.delete('content-security-policy');
+      headers.set('Cache-Control', res.headers.get('Cache-Control') || 'public, max-age=60');
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+    }
+  } catch {
+    // fall through to IP redirect
   }
 
-  const res = await fetch(dest, {
-    method: 'GET',
-    headers: { 'User-Agent': request.headers.get('User-Agent') || 'meeting-bridge' },
-    redirect: 'follow',
-  });
-  const headers = new Headers(res.headers);
-  headers.delete('content-encoding');
-  headers.delete('transfer-encoding');
-  headers.delete('content-security-policy');
-  headers.set('Cache-Control', res.headers.get('Cache-Control') || 'public, max-age=60');
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  // Last resort only — guest address bar may show IP, but Telegram message never does
+  const fallback = `${originHint(env)}${url.pathname}${url.search}`;
+  return Response.redirect(fallback, 302);
 }
 
 function cors(res) {
@@ -174,34 +211,25 @@ function originHint(env) {
   return (env.ORIGIN_HINT || 'http://94.182.92.79').replace(/\/$/, '');
 }
 
-function workerPublic(env) {
-  return (env.WORKER_PUBLIC_URL || 'https://nameless-feather-4353.rezahakimi1921.workers.dev').replace(
-    /\/$/,
-    ''
-  );
+/** Hostname CF is allowed to fetch (never a raw IP). */
+function originHost(env) {
+  return (env.ORIGIN_HOST || 'http://meetstory.duckdns.org').replace(/\/$/, '');
 }
 
-function isDirtyPublicUrl(url) {
+/**
+ * Public Worker base used in Telegram.
+ * Prefer WORKER_PUBLIC_URL after you rename the workers.dev subdomain.
+ */
+function workerPublic(env, requestOrigin) {
+  const configured = String(env.WORKER_PUBLIC_URL || '').trim().replace(/\/$/, '');
+  if (configured) return configured;
+  if (requestOrigin) return String(requestOrigin).replace(/\/$/, '');
+  return 'https://nameless-feather-4353.rezahakimi1921.workers.dev';
+}
+
+function leaksIdentity(url) {
   const u = String(url || '').toLowerCase();
-  if (!u) return true;
-  if (u.includes('94.182.92.79')) return true;
-  if (u.includes('workers.dev')) return true;
-  if (u.includes('rezahakimi')) return true;
-  return false;
-}
-
-function isCleanPublicUrl(url) {
-  const u = String(url || '').trim();
-  if (!/^https?:\/\//i.test(u)) return false;
-  return !isDirtyPublicUrl(u);
-}
-
-function configuredPublicBase(env) {
-  return (
-    env.PUBLIC_BASE_URL ||
-    // Neutral host (no server IP, no personal workers.dev name)
-    'https://bold-frog-8303.zerodeploy.app'
-  ).replace(/\/$/, '');
+  return u.includes('94.182.92.79') || u.includes('rezahakimi');
 }
 
 function requireDb(env) {
@@ -229,9 +257,7 @@ async function initDb(env) {
         completed_at TEXT
       )
     `),
-    env.DB.prepare(
-      `CREATE INDEX IF NOT EXISTS idx_invites_chat ON invites(chat_id)`
-    ),
+    env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_invites_chat ON invites(chat_id)`),
     env.DB.prepare(
       `CREATE INDEX IF NOT EXISTS idx_invites_chat_open ON invites(chat_id, completed, burned)`
     ),
@@ -252,7 +278,6 @@ async function initDb(env) {
   return json({ ok: true, initialized: true });
 }
 
-/** Ensure schema exists (idempotent). */
 async function ensureDb(env) {
   requireDb(env);
   try {
@@ -261,7 +286,7 @@ async function ensureDb(env) {
       .first();
     if (ready?.value === '1') return;
   } catch {
-    // tables missing — create below
+    // create
   }
   await initDb(env);
   await env.DB.prepare(
@@ -286,109 +311,49 @@ async function metaPut(env, key, value) {
     .run();
 }
 
-async function resolvePublicBase(env) {
-  const configured = configuredPublicBase(env);
-  // Ignore dirty PUBLIC_BASE_URL (raw IP / personal workers.dev) for share links
-  if (isCleanPublicUrl(configured)) return configured;
-
-  try {
-    const cached = await metaGet(env, 'public_base');
-    if (isCleanPublicUrl(cached)) return String(cached).replace(/\/$/, '');
-  } catch {
-    // DB may not be ready yet
-  }
-
-  try {
-    const res = await fetch(`${originHint(env)}/meeting/public-base.txt`, {
-      headers: { 'Cache-Control': 'no-cache' },
-    });
-    // fetch to raw IP is blocked by CF — may throw/1003; ignore
-    if (res.ok) {
-      let text = (await res.text()).trim().replace(/\/$/, '');
-      if (text && text.includes('94.182.92.79') && !text.endsWith('/meeting')) {
-        text = `${text}/meeting`;
-      }
-      if (isCleanPublicUrl(text)) {
-        try {
-          await metaPut(env, 'public_base', text);
-        } catch {
-          // ignore
-        }
-        return text;
-      }
-    }
-  } catch {
-    // ignore (often CF 1003 when ORIGIN_HINT is an IP)
-  }
-
-  // Fallback: neutral static host (not IP / not personal workers.dev)
-  return 'https://bold-frog-8303.zerodeploy.app';
-}
-
-function inviteOpenLink(base, code) {
-  return `${base}?i=${encodeURIComponent(code)}`;
-}
-
-function inviteBridgePath(env, code) {
-  return `${workerPublic(env)}/r/${encodeURIComponent(code)}`;
-}
-
 async function getInviteRow(env, code) {
   requireDb(env);
   return env.DB.prepare('SELECT * FROM invites WHERE code = ?').bind(String(code)).first();
 }
 
-async function resolveShareLink(env, code) {
+async function refreshShareLinks(env) {
+  requireDb(env);
+  const result = await env.DB.prepare(
+    `UPDATE invites SET short_url = NULL, open_url = NULL, updated_at = ?`
+  )
+    .bind(new Date().toISOString())
+    .run();
+  try {
+    await env.DB.prepare(`DELETE FROM meta WHERE key = 'public_base'`).run();
+  } catch {
+    // ignore
+  }
+  return json({ ok: true, cleared: result?.meta?.changes ?? true });
+}
+
+/** Always Worker /r/CODE — never IP, never tinyurl. */
+function buildShareLink(env, code, requestOrigin) {
+  return `${workerPublic(env, requestOrigin)}/r/${encodeURIComponent(code)}`;
+}
+
+async function resolveShareLink(env, code, requestOrigin) {
   requireDb(env);
   const record = await getInviteRow(env, code);
-  if (
-    record?.short_url &&
-    record.open_url &&
-    !isDirtyPublicUrl(record.short_url) &&
-    !isDirtyPublicUrl(record.open_url)
-  ) {
-    return record.short_url;
-  }
+  const share = buildShareLink(env, code, requestOrigin);
 
-  // Prefer a clean public base; never put workers.dev / IP / personal name in Telegram text.
-  const base = await resolvePublicBase(env);
-  let target = inviteOpenLink(base, code);
-  if (isDirtyPublicUrl(target)) {
-    // Browser-openable origin page (may be IP). Will be wrapped by shortener below.
-    target = `${originHint(env)}/meeting?i=${encodeURIComponent(code)}`;
-  }
-
-  let shortUrl = null;
-  for (const api of [
-    `https://is.gd/create.php?format=json&url=${encodeURIComponent(target)}`,
-    `https://v.gd/create.php?format=json&url=${encodeURIComponent(target)}`,
-  ]) {
-    try {
-      const res = await fetch(api, { method: 'GET' });
-      const data = await res.json();
-      if (data && data.shorturl && !isDirtyPublicUrl(data.shorturl)) {
-        shortUrl = data.shorturl;
-        break;
-      }
-    } catch {
-      // try next
-    }
-  }
-
-  // Last resort: never send workers.dev with personal account name
-  if (!shortUrl) {
-    shortUrl = isDirtyPublicUrl(target) ? target : target;
-  }
+  // Drop cached dirty links (IP / tinyurl / old hosts)
+  const cached = String(record?.short_url || '');
+  if (cached === share) return share;
 
   if (record) {
     const now = new Date().toISOString();
     await env.DB.prepare(
       `UPDATE invites SET short_url = ?, open_url = ?, updated_at = ? WHERE code = ?`
     )
-      .bind(shortUrl, target, now, String(code))
+      .bind(share, share, now, String(code))
       .run();
   }
-  return shortUrl;
+  return share;
 }
 
 async function tg(env, method, body) {
@@ -443,30 +408,6 @@ async function clearChatPending(env, chatId) {
   await setChatPending(env, chatId, '');
 }
 
-async function burnOpenInvites(env, chatId) {
-  requireDb(env);
-  const now = new Date().toISOString();
-  await env.DB.prepare(
-    `UPDATE invites
-     SET burned = 1, completed = 1, completed_at = ?, updated_at = ?
-     WHERE chat_id = ? AND completed = 0 AND burned = 0`
-  )
-    .bind(now, now, String(chatId))
-    .run();
-}
-
-async function getActiveInvite(env, chatId) {
-  requireDb(env);
-  return env.DB.prepare(
-    `SELECT * FROM invites
-     WHERE chat_id = ? AND completed = 0 AND burned = 0
-     ORDER BY created_at DESC
-     LIMIT 1`
-  )
-    .bind(String(chatId))
-    .first();
-}
-
 async function createInvite(env, chatId, from = {}, alias = '') {
   requireDb(env);
   const chatKey = String(chatId);
@@ -474,7 +415,6 @@ async function createInvite(env, chatId, from = {}, alias = '') {
   while (await getInviteRow(env, code)) code = makeCode();
 
   const now = new Date().toISOString();
-  // Keep previous links open — do not burn them
 
   await env.DB.prepare(
     `INSERT INTO invites (
@@ -503,7 +443,7 @@ async function askForAlias(env, chatId) {
     text: [
       'سلام 💕',
       '',
-      'این لینک برای کیه؟',
+      'این نامه برای کیه؟',
       'یک اسم/Alias بفرست (مثلاً: سارا)',
       '',
       'این اسم فقط برای خودت ذخیره می‌شه؛ طرف مقابل نمی‌بینه.',
@@ -527,17 +467,18 @@ async function listOpenInvites(env, chatId) {
   return res?.results || [];
 }
 
-async function sendLinkMessage(env, chatId, code) {
+async function sendLinkMessage(env, chatId, code, requestOrigin) {
   const row = await getInviteRow(env, code);
-  const link = await resolveShareLink(env, code);
+  const link = await resolveShareLink(env, code, requestOrigin);
   const alias = (row?.alias || '').trim() || '—';
+
   const text = [
-    'سلام 💕 لینک جدیدت آماده‌ست.',
+    'سلام 💞 نامه‌ت آماده‌ست.',
     '',
     `🏷 برای: ${alias}`,
     '',
     'این لینک رو برای کسی که دوست داری بفرست.',
-    'وقتی جواب «آره» بده و فرم رو تموم کنه، همینجا برات می‌فرستم.',
+    'وقتی نامه رو باز کنه و تمومش کنه، همینجا برات می‌فرستم.',
     '',
     link,
   ].join('\n');
@@ -547,37 +488,37 @@ async function sendLinkMessage(env, chatId, code) {
     text,
     disable_web_page_preview: true,
     reply_markup: {
-      inline_keyboard: [[{ text: 'لینک جدید ✨', callback_data: 'link:new' }]],
+      inline_keyboard: [[{ text: '✨ نامه جدید', callback_data: 'link:new' }]],
     },
   });
 }
 
-async function showActiveOrAsk(env, chatId) {
+async function showActiveOrAsk(env, chatId, requestOrigin) {
   const open = await listOpenInvites(env, chatId);
   if (!open.length) {
     await askForAlias(env, chatId);
     return;
   }
 
-  const lines = ['سلام 💕', '', 'لینک‌های بازت:'];
+  const lines = ['سلام 💕', '', 'نامه‌های بازت:'];
   for (const row of open) {
-    const link = await resolveShareLink(env, row.code);
+    const link = await resolveShareLink(env, row.code, requestOrigin);
     const alias = (row.alias || '').trim() || '—';
     lines.push('', `🏷 برای: ${alias}`, link);
   }
-  lines.push('', 'اگر لینک جدید می‌خوای، دکمه پایین رو بزن.');
+  lines.push('', 'اگر نامه جدید می‌خوای، دکمه پایین رو بزن.');
 
   await tg(env, 'sendMessage', {
     chat_id: chatId,
     text: lines.join('\n'),
     disable_web_page_preview: true,
     reply_markup: {
-      inline_keyboard: [[{ text: 'لینک جدید ✨', callback_data: 'link:new' }]],
+      inline_keyboard: [[{ text: '✨ نامه جدید', callback_data: 'link:new' }]],
     },
   });
 }
 
-async function handleBotUpdate(env, update) {
+async function handleBotUpdate(env, update, requestOrigin) {
   if (update.callback_query) {
     const cq = update.callback_query;
     const chatId = cq.message?.chat?.id;
@@ -614,20 +555,18 @@ async function handleBotUpdate(env, update) {
   const text = (msg.text || '').trim();
   if (!text) return;
 
-  // Alias reply
   const state = await getChatState(env, chatId);
   if (state?.pending === 'await_alias' && !text.startsWith('/')) {
     const alias = text.slice(0, 64);
     await clearChatPending(env, chatId);
     const code = await createInvite(env, chatId, msg.from || {}, alias);
-    await sendLinkMessage(env, chatId, code);
+    await sendLinkMessage(env, chatId, code, requestOrigin);
     return;
   }
 
-  if (text.startsWith('/start') || text === '/new' || text === 'لینک جدید') {
-    // Always reset alias prompt state on /start so the bot never looks "stuck"
+  if (text.startsWith('/start') || text === '/new' || text === 'لینک جدید' || text === 'نامه جدید') {
     await clearChatPending(env, chatId);
-    await showActiveOrAsk(env, chatId);
+    await showActiveOrAsk(env, chatId, requestOrigin);
   }
 }
 
@@ -639,16 +578,14 @@ async function getInvite(env, code) {
   }
   const record = await getInviteRow(env, code);
   if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
-  // All minted codes stay openable (even if previously marked burned)
   return json({
     ok: true,
     inviteId: code,
     ownerName: record.first_name || record.username || '',
-    // alias intentionally omitted — owner-only
   });
 }
 
-async function handleNotify(request, env) {
+async function handleNotify(request, env, requestOrigin) {
   try {
     requireDb(env);
     const body = await request.json();
@@ -657,7 +594,6 @@ async function handleNotify(request, env) {
     const record = await getInviteRow(env, String(inviteId));
     if (!record) return json({ ok: false, error: 'invite_not_found' }, 404);
     if (record.burned) {
-      // revive previously burned codes so older shared links still open
       await env.DB.prepare(`UPDATE invites SET burned = 0, updated_at = ? WHERE code = ?`)
         .bind(new Date().toISOString(), String(inviteId))
         .run();
@@ -669,14 +605,13 @@ async function handleNotify(request, env) {
     const order = body?.order?.label || '—';
     const emoji = body?.order?.emoji || '💕';
     const code = String(inviteId);
-    const link = await resolveShareLink(env, code);
+    const link = await resolveShareLink(env, code, requestOrigin);
     const alias = (record.alias || '').trim() || '—';
     const text = [
       'خبر خوب! جواب مثبت ثبت شد 🎉',
       '',
       `🏷 برای: ${alias}`,
-      `🔗 لینک:`,
-      link,
+      `🔗 ${link}`,
       `کد دعوت: ${code}`,
       '',
       `📅 ${weekday} ${dateLabel}`.trim(),
@@ -718,9 +653,10 @@ async function pollUpdates(env) {
     allowed_updates: ['message', 'callback_query'],
   });
   if (!data.ok) return;
+  const origin = workerPublic(env);
   for (const update of data.result || []) {
     offset = update.update_id + 1;
-    await handleBotUpdate(env, update);
+    await handleBotUpdate(env, update, origin);
   }
   await metaPut(env, 'update_offset', String(offset));
 }

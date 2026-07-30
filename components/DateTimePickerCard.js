@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, radii, spacing } from '../theme';
+import { colors, fonts, radii, spacing } from '../theme';
 import {
   MONTHS_FA,
   WEEKDAYS_FA,
@@ -11,8 +11,9 @@ import {
   todayJalali,
 } from '../utils/jalali';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
+import LetterSheet from './LetterSheet';
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 10); // 10..23
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 10);
 const MINUTES = [0, 15, 30, 45];
 
 function pad2(n) {
@@ -43,9 +44,7 @@ export default function DateTimePickerCard({ onNext, initialDate, initialTime })
       nextJm = 1;
       nextJy += 1;
     }
-    if (nextJy < today.jy || (nextJy === today.jy && nextJm < today.jm)) {
-      return;
-    }
+    if (nextJy < today.jy || (nextJy === today.jy && nextJm < today.jm)) return;
     setJy(nextJy);
     setJm(nextJm);
   };
@@ -73,165 +72,144 @@ export default function DateTimePickerCard({ onNext, initialDate, initialTime })
   };
 
   return (
-    <View style={styles.card}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.title}>کی و ساعت چند بریم بیرون؟</Text>
-        <Text style={styles.subtitle}>روز و ساعت رو با هم انتخاب کن 💕</Text>
-
-        <View style={styles.monthRow}>
-          <Pressable onPress={() => shiftMonth(1)} style={styles.navBtn}>
-            <Text style={styles.navText}>›</Text>
-          </Pressable>
-          <Text style={styles.monthLabel}>
-            {MONTHS_FA[jm - 1]} {toFaDigits(jy)}
-          </Text>
-          <Pressable onPress={() => shiftMonth(-1)} style={styles.navBtn}>
-            <Text style={styles.navText}>‹</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.weekRow}>
-          {WEEKDAYS_FA.map((d) => (
-            <Text key={d} style={styles.weekHead}>
-              {d.slice(0, 1)}
-            </Text>
-          ))}
-        </View>
-
-        <View style={styles.grid}>
-          {grid.map((cell, idx) => {
-            const disabled =
-              !cell.inMonth || cell.jd == null || isBeforeToday(cell.jy, cell.jm, cell.jd);
-            const isSelected =
-              selected &&
-              selected.jy === cell.jy &&
-              selected.jm === cell.jm &&
-              selected.jd === cell.jd;
-            return (
-              <Pressable
-                key={idx}
-                disabled={disabled}
-                onPress={() => pickDay(cell)}
-                style={[styles.day, isSelected && styles.daySelected, disabled && styles.dayDisabled]}
-              >
-                <Text
-                  style={[
-                    styles.dayText,
-                    isSelected && styles.dayTextSelected,
-                    disabled && styles.dayTextDisabled,
-                  ]}
-                >
-                  {cell.inMonth && cell.jd != null ? toFaDigits(cell.jd) : ''}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={styles.section}>ساعت · {timeLabelFa}</Text>
+    <LetterSheet stamp={'صفحه\nدوم'} style={styles.sheet}>
+      <View style={styles.inner}>
         <ScrollView
-          horizontal
-          nestedScrollEnabled
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.row}
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          {HOURS.map((h) => {
-            const active = hour === h;
-            return (
-              <Pressable
-                key={h}
-                onPress={() => setHour(h)}
-                style={[styles.chip, active && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                  {toFaDigits(pad2(h))}
-                </Text>
-              </Pressable>
-            );
-          })}
+          <Text style={styles.eyebrow}>روی کاغذ نامه بنویس</Text>
+          <Text style={styles.title}>کی و ساعت چند بریم بیرون؟</Text>
+          <Text style={styles.subtitle}>روز و ساعت رو با جوهر انتخاب کن</Text>
+
+          <View style={styles.monthRow}>
+            <Pressable onPress={() => shiftMonth(1)} style={styles.navBtn}>
+              <Text style={styles.navText}>›</Text>
+            </Pressable>
+            <Text style={styles.monthLabel}>
+              {MONTHS_FA[jm - 1]} {toFaDigits(jy)}
+            </Text>
+            <Pressable onPress={() => shiftMonth(-1)} style={styles.navBtn}>
+              <Text style={styles.navText}>‹</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.weekRow}>
+            {WEEKDAYS_FA.map((d) => (
+              <Text key={d} style={styles.weekHead}>
+                {d.slice(0, 1)}
+              </Text>
+            ))}
+          </View>
+
+          <View style={styles.grid}>
+            {grid.map((cell, idx) => {
+              const disabled =
+                !cell.inMonth || cell.jd == null || isBeforeToday(cell.jy, cell.jm, cell.jd);
+              const isSelected =
+                selected &&
+                selected.jy === cell.jy &&
+                selected.jm === cell.jm &&
+                selected.jd === cell.jd;
+              return (
+                <Pressable
+                  key={idx}
+                  disabled={disabled}
+                  onPress={() => pickDay(cell)}
+                  style={[styles.day, isSelected && styles.daySelected, disabled && styles.dayDisabled]}
+                >
+                  <Text
+                    style={[
+                      styles.dayText,
+                      isSelected && styles.dayTextSelected,
+                      disabled && styles.dayTextDisabled,
+                    ]}
+                  >
+                    {cell.inMonth && cell.jd != null ? toFaDigits(cell.jd) : ''}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Text style={styles.section}>ساعت · {timeLabelFa}</Text>
+          <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+            {HOURS.map((h) => {
+              const active = hour === h;
+              return (
+                <Pressable key={h} onPress={() => setHour(h)} style={[styles.chip, active && styles.chipActive]}>
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{toFaDigits(pad2(h))}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <Text style={styles.section}>دقیقه</Text>
+          <View style={styles.minuteRow}>
+            {MINUTES.map((m) => {
+              const active = minute === m;
+              return (
+                <Pressable
+                  key={m}
+                  onPress={() => setMinute(m)}
+                  style={[styles.chip, styles.minuteChip, active && styles.chipActive]}
+                >
+                  <Text style={[styles.chipText, active && styles.chipTextActive]}>{toFaDigits(pad2(m))}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {affirm ? <Text style={styles.affirm}>با جوهر قرمز تو نامه ثبت شد…</Text> : null}
         </ScrollView>
 
-        <Text style={styles.section}>دقیقه</Text>
-        <View style={styles.minuteRow}>
-          {MINUTES.map((m) => {
-            const active = minute === m;
-            return (
-              <Pressable
-                key={m}
-                onPress={() => setMinute(m)}
-                style={[styles.chip, styles.minuteChip, active && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                  {toFaDigits(pad2(m))}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <View style={styles.footer}>
+          <Animated.View style={{ transform: [{ scale: btnScale }] }}>
+            <Pressable
+              disabled={!selected || affirm}
+              onPress={handleNext}
+              style={[styles.nextBtn, (!selected || affirm) && styles.nextDisabled]}
+            >
+              <Text style={styles.nextText}>ورق بزن</Text>
+            </Pressable>
+          </Animated.View>
         </View>
-
-        {affirm ? <Text style={styles.affirm}>عالی… تو تقویم قلبم زدم 💗</Text> : null}
-      </ScrollView>
-
-      <View style={styles.footer}>
-        <Animated.View style={{ transform: [{ scale: btnScale }] }}>
-          <Pressable
-            disabled={!selected || affirm}
-            onPress={handleNext}
-            style={[styles.nextBtn, (!selected || affirm) && styles.nextDisabled]}
-          >
-            <Text style={styles.nextText}>بعدی</Text>
-          </Pressable>
-        </Animated.View>
       </View>
-    </View>
+    </LetterSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radii.card,
-    width: '100%',
-    maxWidth: 420,
-    maxHeight: '78vh',
-    overflow: 'hidden',
-    shadowColor: '#E91E63',
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-  },
-  scroll: {
-    flexGrow: 1,
-    flexShrink: 1,
-  },
-  scrollContent: {
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-  },
+  sheet: { maxHeight: '78vh' },
+  inner: { maxHeight: '70vh' },
+  scroll: { flexGrow: 1, flexShrink: 1 },
+  scrollContent: { paddingBottom: spacing.sm },
   footer: {
-    paddingHorizontal: spacing.md,
     paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: '#F3E0EA',
-    backgroundColor: colors.card,
+    borderTopColor: colors.paperEdge,
+  },
+  eyebrow: {
+    fontFamily: fonts.body,
+    color: colors.wax,
+    fontSize: 12,
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginBottom: 4,
   },
   title: {
-    color: colors.text,
+    fontFamily: fonts.body,
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '700',
     textAlign: 'right',
     writingDirection: 'rtl',
   },
   subtitle: {
-    color: colors.muted,
+    fontFamily: fonts.body,
+    color: colors.inkSoft,
     fontSize: 13,
     marginTop: 4,
     marginBottom: spacing.sm,
@@ -244,39 +222,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.xs,
   },
-  monthLabel: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  monthLabel: { fontFamily: fonts.body, color: colors.ink, fontSize: 14, fontWeight: '700' },
   navBtn: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#F8EAF2',
+    backgroundColor: '#F8E6EE',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  navText: {
-    fontSize: 18,
-    color: colors.primary,
-    lineHeight: 20,
-  },
-  weekRow: {
-    flexDirection: 'row-reverse',
-    marginBottom: 2,
-  },
+  navText: { fontSize: 18, color: colors.wax, lineHeight: 20 },
+  weekRow: { flexDirection: 'row-reverse', marginBottom: 2 },
   weekHead: {
     width: `${100 / 7}%`,
     textAlign: 'center',
     color: colors.muted,
     fontSize: 11,
+    fontFamily: fonts.body,
   },
-  grid: {
-    flexDirection: 'row-reverse',
-    flexWrap: 'wrap',
-    marginBottom: spacing.sm,
-  },
+  grid: { flexDirection: 'row-reverse', flexWrap: 'wrap', marginBottom: spacing.sm },
   day: {
     width: `${100 / 7}%`,
     height: 32,
@@ -284,23 +248,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
   },
-  daySelected: {
-    backgroundColor: colors.primary,
-  },
-  dayDisabled: {
-    opacity: 0.35,
-  },
-  dayText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dayTextSelected: {
-    color: '#fff',
-  },
-  dayTextDisabled: {
-    color: colors.muted,
-  },
+  daySelected: { backgroundColor: colors.wax },
+  dayDisabled: { opacity: 0.35 },
+  dayText: { color: colors.ink, fontSize: 12, fontWeight: '600', fontFamily: fonts.body },
+  dayTextSelected: { color: '#fff' },
+  dayTextDisabled: { color: colors.muted },
   section: {
     color: colors.muted,
     fontSize: 12,
@@ -308,18 +260,10 @@ const styles = StyleSheet.create({
     writingDirection: 'rtl',
     marginBottom: 4,
     marginTop: spacing.xs,
+    fontFamily: fonts.body,
   },
-  row: {
-    flexDirection: 'row-reverse',
-    gap: 6,
-    paddingVertical: 4,
-  },
-  minuteRow: {
-    flexDirection: 'row-reverse',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: spacing.xs,
-  },
+  row: { flexDirection: 'row-reverse', gap: 6, paddingVertical: 4 },
+  minuteRow: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 6, marginBottom: spacing.xs },
   chip: {
     minWidth: 44,
     paddingVertical: 7,
@@ -327,43 +271,29 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     backgroundColor: '#FFF9FC',
     borderWidth: 1.5,
-    borderColor: '#F3E0EA',
+    borderColor: colors.paperEdge,
     alignItems: 'center',
   },
-  minuteChip: {
-    flexGrow: 1,
-  },
-  chipActive: {
-    backgroundColor: '#FFE8F1',
-    borderColor: colors.primary,
-  },
-  chipText: {
-    color: colors.text,
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  chipTextActive: {
-    color: colors.primary,
-  },
+  minuteChip: { flexGrow: 1 },
+  chipActive: { backgroundColor: '#FFE8F1', borderColor: colors.wax },
+  chipText: { color: colors.ink, fontWeight: '600', fontSize: 13, fontFamily: fonts.body },
+  chipTextActive: { color: colors.wax },
   affirm: {
-    color: colors.primary,
+    color: colors.wax,
     textAlign: 'center',
     writingDirection: 'rtl',
     marginTop: spacing.xs,
     fontSize: 13,
+    fontFamily: fonts.body,
   },
   nextBtn: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.wax,
     borderRadius: radii.pill,
     paddingVertical: 13,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.gold,
   },
-  nextDisabled: {
-    opacity: 0.45,
-  },
-  nextText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  nextDisabled: { opacity: 0.45 },
+  nextText: { color: '#fff', fontSize: 15, fontWeight: '700', fontFamily: fonts.body },
 });

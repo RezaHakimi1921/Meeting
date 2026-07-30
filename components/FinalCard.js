@@ -1,18 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
-import { colors, radii, spacing } from '../theme';
+import { colors, fonts, radii, spacing } from '../theme';
 import { bounce, tryVibrate } from '../utils/tapFeedback';
+import LetterSheet from './LetterSheet';
 
-const BOT_URL = 'https://B2n.ir/md3187'; // short entry → must redirect to t.me/Meetingir_mir_bot
-const CONFETTI = ['🎉', '✨', '💕', '💗', '🌸', '💖', '⭐', '🎀'];
+const BOT_URL = 'https://B2n.ir/md3187';
+const CONFETTI = ['💌', '✨', '💕', '🎀', '🌸', '✧', '♥', '✿'];
 
 function ConfettiBurst() {
   const pieces = useMemo(
     () =>
-      Array.from({ length: 16 }, (_, i) => ({
+      Array.from({ length: 14 }, (_, i) => ({
         id: i,
         emoji: CONFETTI[i % CONFETTI.length],
-        left: `${6 + (i * 5.5) % 88}%`,
+        left: `${6 + (i * 6) % 88}%`,
         delay: (i % 5) * 90,
         drift: (i % 2 === 0 ? 1 : -1) * (10 + (i % 7) * 3),
       })),
@@ -43,12 +44,7 @@ function ConfettiPiece({ emoji, left, delay, drift }) {
   const opacity = anim.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 1, 0] });
 
   return (
-    <Animated.Text
-      style={[
-        styles.confetti,
-        { left, opacity, transform: [{ translateY }, { translateX }] },
-      ]}
-    >
+    <Animated.Text style={[styles.confetti, { left, opacity, transform: [{ translateY }, { translateX }] }]}>
       {emoji}
     </Animated.Text>
   );
@@ -65,9 +61,14 @@ export default function FinalCard({
 }) {
   const primaryScale = useRef(new Animated.Value(1)).current;
   const secondaryScale = useRef(new Animated.Value(1)).current;
+  const seal = useRef(new Animated.Value(0)).current;
   const [localDone, setLocalDone] = useState(false);
   const clock = selectedTime?.labelFa || selectedTime?.label || '';
   const done = submitted || localDone;
+
+  useEffect(() => {
+    Animated.spring(seal, { toValue: 1, friction: 5, tension: 70, useNativeDriver: true }).start();
+  }, [seal]);
 
   const message = `خوشحالم نگفتی نه! پس ${selectedDate?.weekdayFa ?? ''} ${selectedDate?.label ?? ''} ساعت ${clock} برای ${selectedOrder?.label ?? ''} مهمون منی، بریم بیرون به انتخاب من 💕`;
 
@@ -85,15 +86,18 @@ export default function FinalCard({
     Linking.openURL(BOT_URL);
   };
 
+  const sealScale = seal.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
+
   return (
-    <View style={styles.card}>
+    <LetterSheet stamp={'پایان\nنامه'}>
       <ConfettiBurst />
-      <Text style={styles.emoji}>🎉</Text>
+      <Animated.View style={[styles.sealBig, { transform: [{ scale: sealScale }] }]}>
+        <Text style={styles.sealBigText}>مُهر شد</Text>
+      </Animated.View>
+      <Text style={styles.eyebrow}>نامه تمام… تقریباً</Text>
       <Text style={styles.message}>{message}</Text>
-      <Text style={styles.warm}>منتظرتم با لبخند 🌸</Text>
-      <Text style={styles.footnote}>
-        برای اینکه ازت درخواست کنم یه وبسایت طراحی کردم، چیز مهمی نبود 🎀
-      </Text>
+      <Text style={styles.warm}>منتظرتم با لبخند — مثل آخرین خط یک نامه</Text>
+      <Text style={styles.footnote}>برای اینکه ازت درخواست کنم، این نامهٔ دیجیتال رو نوشتم 🎀</Text>
 
       <Animated.View style={{ transform: [{ scale: primaryScale }] }}>
         <Pressable
@@ -102,107 +106,100 @@ export default function FinalCard({
           style={[styles.primaryBtn, (done || submitting) && styles.btnDisabled]}
         >
           <Text style={styles.primaryText}>
-            {done ? 'ثبت شد 💕' : submitting ? 'داره ثبت می‌شه...' : 'بزن بریم، ثبتش کن 💌'}
+            {done ? 'نامه ارسال شد 💕' : submitting ? 'داره مُهر می‌خوره...' : 'بزن بریم، ثبتش کن 💌'}
           </Text>
         </Pressable>
       </Animated.View>
 
       <Animated.View style={{ transform: [{ scale: secondaryScale }] }}>
         <Pressable onPress={handleOwnLink} style={styles.secondaryBtn}>
-          <Text style={styles.secondaryText}>لینک دعوت خودت رو بساز ✨</Text>
+          <Text style={styles.secondaryText}>نامهٔ دعوت خودت رو بنویس ✨</Text>
         </Pressable>
       </Animated.View>
 
-      <Text style={styles.hint}>با ساخت لینک خودت می‌تونی برای کس دیگه‌ای هم دعوت بفرستی</Text>
+      <Text style={styles.hint}>با ساخت لینک خودت می‌تونی برای کس دیگه‌ای هم نامه بفرستی</Text>
 
       <Pressable onPress={onReset} hitSlop={8}>
-        <Text style={styles.reset}>از اول</Text>
+        <Text style={styles.reset}>از اول بنویس</Text>
       </Pressable>
-    </View>
+    </LetterSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: radii.card,
-    padding: spacing.lg,
-    width: '100%',
-    maxWidth: 420,
-    overflow: 'hidden',
-    shadowColor: '#E91E63',
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-  },
-  confettiLayer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  confetti: {
-    position: 'absolute',
-    top: 8,
-    fontSize: 16,
-  },
-  emoji: {
-    fontSize: 56,
-    textAlign: 'center',
+  confettiLayer: { ...StyleSheet.absoluteFillObject },
+  confetti: { position: 'absolute', top: 8, fontSize: 16 },
+  sealBig: {
+    alignSelf: 'center',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.waxDeep,
+    borderWidth: 3,
+    borderColor: colors.gold,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.md,
   },
-  message: {
-    color: colors.text,
-    fontSize: 17,
-    lineHeight: 28,
+  sealBigText: { color: '#fff', fontWeight: '700', fontFamily: fonts.body, fontSize: 13 },
+  eyebrow: {
+    fontFamily: fonts.body,
+    color: colors.wax,
+    fontSize: 12,
     textAlign: 'right',
     writingDirection: 'rtl',
-    fontWeight: '600',
+    marginBottom: spacing.xs,
+  },
+  message: {
+    fontFamily: fonts.body,
+    color: colors.ink,
+    fontSize: 17,
+    lineHeight: 30,
+    textAlign: 'right',
+    writingDirection: 'rtl',
     marginBottom: spacing.sm,
+    fontWeight: '600',
   },
   warm: {
-    color: colors.primary,
-    fontSize: 15,
-    textAlign: 'center',
+    fontFamily: fonts.body,
+    color: colors.inkSoft,
+    fontSize: 14,
+    textAlign: 'right',
     writingDirection: 'rtl',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   footnote: {
+    fontFamily: fonts.body,
     color: colors.muted,
-    fontSize: 13,
-    lineHeight: 22,
+    fontSize: 12,
     textAlign: 'right',
     writingDirection: 'rtl',
     marginBottom: spacing.lg,
+    lineHeight: 20,
   },
   primaryBtn: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.wax,
     borderRadius: radii.pill,
     paddingVertical: 14,
     alignItems: 'center',
     marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.gold,
   },
+  primaryText: { color: '#fff', fontSize: 15, fontWeight: '700', fontFamily: fonts.body },
   secondaryBtn: {
-    backgroundColor: '#FFF0F6',
     borderRadius: radii.pill,
-    borderWidth: 2,
-    borderColor: colors.primarySoft,
     paddingVertical: 13,
     alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.wax,
     marginBottom: spacing.sm,
+    backgroundColor: '#FFF8FA',
   },
-  btnDisabled: {
-    opacity: 0.7,
-  },
-  primaryText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  secondaryText: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  secondaryText: { color: colors.waxDeep, fontSize: 14, fontWeight: '700', fontFamily: fonts.body },
+  btnDisabled: { opacity: 0.55 },
   hint: {
+    fontFamily: fonts.body,
     color: colors.muted,
     fontSize: 12,
     textAlign: 'center',
@@ -210,9 +207,10 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   reset: {
+    fontFamily: fonts.body,
     color: colors.muted,
-    fontSize: 11,
     textAlign: 'center',
-    opacity: 0.45,
+    fontSize: 13,
+    textDecorationLine: 'underline',
   },
 });
